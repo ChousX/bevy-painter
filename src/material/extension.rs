@@ -1,23 +1,27 @@
 //! Material extension for triplanar voxel rendering.
 
-use bevy::ecs::system::{SystemParamItem, lifetimeless::SRes};
-use bevy::pbr::{ExtendedMaterial, MaterialExtension, StandardMaterial};
+use bevy::ecs::system::{lifetimeless::SRes, SystemParamItem};
+use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline, StandardMaterial};
 use bevy::prelude::*;
 use bevy::render::{
     render_asset::RenderAssets,
     render_resource::{
-        AsBindGroup, AsBindGroupError, BindGroupEntries, BindGroupLayoutDescriptor,
-        BindGroupLayoutEntries, BindGroupLayoutEntry, BindingResources, BufferInitDescriptor,
-        BufferUsages, PipelineCache, PreparedBindGroup, SamplerBindingType, ShaderStages,
-        ShaderType, TextureSampleType, UnpreparedBindGroup,
         binding_types::{sampler, storage_buffer_read_only, texture_2d_array, uniform_buffer},
+        AsBindGroup, AsBindGroupError, BindGroupEntries, BindGroupLayout,
+        BindGroupLayoutEntries, BindGroupLayoutEntry, BindingResources, BufferInitDescriptor,
+        BufferUsages, PreparedBindGroup, RenderPipelineDescriptor, SamplerBindingType,
+        ShaderStages, ShaderType, SpecializedMeshPipelineError, TextureSampleType,
+        UnpreparedBindGroup,
     },
     renderer::RenderDevice,
     texture::{FallbackImage, GpuImage},
 };
 use bevy::shader::ShaderRef;
+use bytemuck::{Pod, Zeroable};
 
-use crate::palette::{MAX_MATERIALS, MaterialPropertiesGpu, TexturePalette};
+use crate::mesh::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
+use crate::palette::{MaterialPropertiesGpu, TexturePalette, MAX_MATERIALS};
 
 /// Shader asset path.
 const TRIPLANAR_SHADER_PATH: &str = "shaders/triplanar_extension.wgsl";
@@ -26,7 +30,8 @@ const TRIPLANAR_SHADER_PATH: &str = "shaders/triplanar_extension.wgsl";
 pub type TriplanarVoxelMaterial = ExtendedMaterial<StandardMaterial, TriplanarExtension>;
 
 /// GPU-side settings for triplanar rendering.
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
+#[derive(Clone, Copy, Debug, Default, ShaderType, Pod, Zeroable)]
+#[repr(C)]
 pub struct TriplanarSettings {
     /// Global texture scale multiplier.
     pub texture_scale: f32,
@@ -109,7 +114,7 @@ impl TriplanarExtension {
     }
 
     /// Build GPU settings from this extension and palette.
-    fn build_settings(&self, palette: Option<&TexturePalette>) -> TriplanarSettings {
+    pub fn build_settings(&self, palette: Option<&TexturePalette>) -> TriplanarSettings {
         let mut flags = 0u32;
 
         if self.use_biplanar_color {
@@ -144,12 +149,13 @@ impl AsBindGroup for TriplanarExtension {
         SRes<Assets<TexturePalette>>,
         SRes<FallbackImage>,
     );
+
     fn as_bind_group(
         &self,
-        layout: &bevy::render::render_resource::BindGroupLayout,
+        layout: &BindGroupLayout,
         render_device: &RenderDevice,
         (gpu_images, palettes, fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
-    ) -> std::result::Result<PreparedBindGroup, AsBindGroupError> {
+    ) -> Result<PreparedBindGroup, AsBindGroupError> {
         // Get the palette
         let palette = palettes.get(&self.palette);
 
@@ -191,15 +197,10 @@ impl AsBindGroup for TriplanarExtension {
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         });
 
-        // Get bind group layout from pipeline cache
-        let bg_layout = pipeline_cache.get_bind_group_layout(layout);
-
-        // Create bind group with explicit binding indices matching layout
-        // The layout uses binding indices 100-107, but create_bind_group
-        // expects entries in the same order as the layout entries
+        // Create bind group - entries must be in same order as layout entries
         let bind_group = render_device.create_bind_group(
             Some("triplanar_extension_bind_group"),
-            &bg_layout,
+            layout,
             &BindGroupEntries::sequential((
                 // Binding 100: Settings uniform
                 settings_buffer.as_entire_binding(),
@@ -234,14 +235,11 @@ impl AsBindGroup for TriplanarExtension {
 
     fn unprepared_bind_group(
         &self,
-        _layout: &bevy::render::render_resource::BindGroupLayout,
+        _layout: &BindGroupLayout,
         _render_device: &RenderDevice,
         _param: &mut SystemParamItem<'_, '_, Self::Param>,
         _force_no_bindless: bool,
-    ) -> Result<UnpreparedBindGroup<Self::Data>, AsBindGroupError> {
-        // We implement as_bind_group directly because we need to:
-        // 1. Resolve the palette handle to get texture handles
-        // 2. Create uniform/storage buffers for settings and material properties
+    ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
         Err(AsBindGroupError::CreateBindGroupDirectly)
     }
 
@@ -255,33 +253,25 @@ impl AsBindGroup for TriplanarExtension {
         BindGroupLayoutEntries::with_indices(
             ShaderStages::VERTEX_FRAGMENT,
             (
-                // Binding 100: Settings uniform
                 (100, uniform_buffer::<TriplanarSettings>(false)),
-                // Binding 101: Albedo texture array
                 (
                     101,
                     texture_2d_array(TextureSampleType::Float { filterable: true }),
                 ),
-                // Binding 102: Albedo sampler
                 (102, sampler(SamplerBindingType::Filtering)),
-                // Binding 103: Material properties storage buffer
                 (
                     103,
                     storage_buffer_read_only::<[MaterialPropertiesGpu; MAX_MATERIALS]>(false),
                 ),
-                // Binding 104: Normal texture array
                 (
                     104,
                     texture_2d_array(TextureSampleType::Float { filterable: true }),
                 ),
-                // Binding 105: Normal sampler
                 (105, sampler(SamplerBindingType::Filtering)),
-                // Binding 106: ARM texture array
                 (
                     106,
                     texture_2d_array(TextureSampleType::Float { filterable: true }),
                 ),
-                // Binding 107: ARM sampler
                 (107, sampler(SamplerBindingType::Filtering)),
             ),
         )
@@ -290,8 +280,8 @@ impl AsBindGroup for TriplanarExtension {
 
     fn bind_group_data(&self) -> Self::Data {}
 
-    fn label() -> &'static str {
-        "triplanar_extension"
+    fn label() -> Option<&'static str> {
+        Some("triplanar_extension")
     }
 }
 
@@ -310,6 +300,26 @@ impl MaterialExtension for TriplanarExtension {
 
     fn deferred_fragment_shader() -> ShaderRef {
         TRIPLANAR_SHADER_PATH.into()
+    }
+
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        // Define the vertex layout including our custom attributes
+        let vertex_layout = layout.0.get_layout(&[
+            Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+            Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+            ATTRIBUTE_MATERIAL_IDS.at_shader_location(3),
+            ATTRIBUTE_MATERIAL_WEIGHTS.at_shader_location(4),
+        ])?;
+
+        descriptor.vertex.buffers = vec![vertex_layout];
+
+        Ok(())
     }
 }
 
@@ -346,7 +356,6 @@ mod tests {
         let ext = TriplanarExtension::default();
         let settings = ext.build_settings(None);
 
-        // Without palette, normals and ARM flags are disabled
         assert!(settings.flags & TriplanarSettings::FLAG_USE_BIPLANAR != 0);
         assert!(settings.flags & TriplanarSettings::FLAG_ENABLE_NORMALS == 0);
         assert!(settings.flags & TriplanarSettings::FLAG_HAS_ARM == 0);

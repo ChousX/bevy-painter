@@ -1,10 +1,8 @@
 //! Systems for managing triplanar materials.
 
+use crate::palette::TexturePalette;
 use bevy::prelude::*;
 use std::collections::HashSet;
-
-use super::extension::TriplanarSettings;
-use crate::palette::TexturePalette;
 
 /// System set for triplanar material systems.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -64,7 +62,7 @@ pub fn validate_palettes(
         // Validate the palette
         match palette.validate(&images) {
             Ok(()) => {
-                info!(
+                bevy::prelude::info!(
                     "Validated texture palette with {} materials",
                     palette.material_count()
                 );
@@ -72,41 +70,6 @@ pub fn validate_palettes(
             }
             Err(e) => {
                 panic!("Texture palette validation failed: {}", e);
-            }
-        }
-    }
-}
-
-/// System that updates material settings when their palettes change.
-///
-/// This ensures that material flags (like `has_arm`) are kept in sync
-/// with the actual palette contents.
-pub fn sync_material_settings(
-    palettes: Res<Assets<TexturePalette>>,
-    mut materials: ResMut<Assets<crate::material::TriplanarVoxelMaterial>>,
-) {
-    if !palettes.is_changed() {
-        return;
-    }
-
-    for (_, material) in materials.iter_mut() {
-        let ext = &mut material.extension;
-
-        if let Some(palette) = palettes.get(&ext.palette) {
-            // Update ARM flag based on palette
-            let has_arm = palette.has_arm();
-            if has_arm {
-                ext.settings.flags |= TriplanarSettings::FLAG_HAS_ARM;
-            } else {
-                ext.settings.flags &= !TriplanarSettings::FLAG_HAS_ARM;
-            }
-
-            // Update normal flag based on palette and setting
-            let can_use_normals = ext.enable_normal_maps && palette.has_normal_maps();
-            if can_use_normals {
-                ext.settings.flags |= TriplanarSettings::FLAG_ENABLE_NORMALS;
-            } else {
-                ext.settings.flags &= !TriplanarSettings::FLAG_ENABLE_NORMALS;
             }
         }
     }

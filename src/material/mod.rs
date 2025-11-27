@@ -6,5 +6,5 @@
 mod extension;
 mod systems;
 
-pub use extension::{TriplanarExtension, TriplanarVoxelMaterial};
-pub use systems::TriplanarMaterialSystems;
+pub use extension::{TriplanarExtension, TriplanarSettings, TriplanarVoxelMaterial};
+pub use systems::{TriplanarMaterialSystems, validate_palettes};
