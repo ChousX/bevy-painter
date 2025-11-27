@@ -11,5 +11,5 @@ mod validation;
 
 pub use asset::TexturePalette;
 pub use builder::PaletteBuilder;
-pub use properties::PaletteMaterial;
+pub use properties::{MAX_MATERIALS, MaterialPropertiesGpu, PaletteMaterial};
 pub use validation::PaletteValidationError;

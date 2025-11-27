@@ -348,6 +348,7 @@ name = "bevy-painter"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bytemuck",
  "thiserror 2.0.17",
 ]
 

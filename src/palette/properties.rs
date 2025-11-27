@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use bevy::render::render_resource::ShaderType;
+use bytemuck::{Pod, Zeroable};
 
 /// Properties for a single material layer in the palette.
 ///
@@ -91,7 +92,8 @@ impl PaletteMaterial {
 /// GPU-side representation of material properties.
 ///
 /// This is stored in a uniform buffer and indexed by material ID in the shader.
-#[derive(Clone, Copy, Debug, Default, ShaderType)]
+#[derive(Clone, Copy, Debug, Default, ShaderType, Pod, Zeroable)]
+#[repr(C)]
 pub struct MaterialPropertiesGpu {
     /// Texture scale (world units per repeat).
     pub texture_scale: f32,
