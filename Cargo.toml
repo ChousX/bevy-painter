@@ -2,5 +2,24 @@
 name = "bevy-painter"
 version = "0.1.0"
 edition = "2024"
+description = "Triplanar mapping with multi-material blending for voxel meshes"
+keywords = ["bevy", "voxel", "triplanar", "terrain", "material"]
+categories = ["game-development", "rendering::graphics-api"]
+
+[features]
+default = []
+debug_viz = []
 
 [dependencies]
+bevy = { version = "0.17", default-features = false, features = [
+    "bevy_asset",
+    "bevy_render",
+    "bevy_pbr",
+    "bevy_core_pipeline",
+    "basis-universal",
+    "ktx2",
+]}
+thiserror = "2"
+
+[dev-dependencies]
+bevy = { version = "0.17" }
