@@ -1,10 +1,11 @@
-//! Triplanar voxel material implementation.
-//!
-//! This module provides [`TriplanarExtension`], a material extension that adds
-//! triplanar mapping and multi-material blending to Bevy's [`StandardMaterial`].
-
+//! Material extension for triplanar voxel rendering.
+use bevy::prelude::*;
 mod extension;
-mod systems;
 
 pub use extension::{TriplanarExtension, TriplanarSettings, TriplanarVoxelMaterial};
-pub use systems::{TriplanarMaterialSystems, validate_palettes};
+
+/// Register embedded shader assets for the material module.
+pub(crate) fn register_embedded_assets(app: &mut App) {
+bevy::asset::
+    embedded_asset!(app, "shaders/triplanar_extension.wgsl");
+}

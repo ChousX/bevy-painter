@@ -5,62 +5,11 @@
 //!
 //! ## Features
 //!
-//! - Triplanar/biplanar texture projection (no UV seams)
-//! - Up to 4 materials blended per vertex
-//! - Texture array support for efficient material palettes
-//! - Optional normal and ARM (AO/Roughness/Metallic) maps
-//! - Per-material texture scaling and blend sharpness
-//!
-//! ## Quick Start
-//!
-//! ```ignore
-//! use bevy::prelude::*;
-//! use bevy_triplanar_voxel::prelude::*;
-//!
-//! fn main() {
-//!     App::new()
-//!         .add_plugins(DefaultPlugins)
-//!         .add_plugins(TriplanarVoxelPlugin)
-//!         .add_systems(Startup, setup)
-//!         .run();
-//! }
-//!
-//! fn setup(
-//!     mut commands: Commands,
-//!     mut meshes: ResMut<Assets<Mesh>>,
-//!     mut materials: ResMut<Assets<TriplanarVoxelMaterial>>,
-//!     mut palettes: ResMut<Assets<TexturePalette>>,
-//!     asset_server: Res<AssetServer>,
-//! ) {
-//!     // Create a texture palette
-//!     let palette = PaletteBuilder::new()
-//!         .with_albedo(asset_server.load("terrain/albedo.ktx2"))
-//!         .add_material_named("grass")
-//!         .add_material_named("stone")
-//!         .build();
-//!     let palette_handle = palettes.add(palette);
-//!
-//!     // Create a mesh with material data
-//!     let mesh = TriplanarMeshBuilder::new()
-//!         .with_vertex_single([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
-//!         .with_vertex_single([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
-//!         .with_vertex_single([0.5, 0.0, 1.0], [0.0, 1.0, 0.0], 1)
-//!         .with_indices(vec![0, 1, 2])
-//!         .build_unwrap();
-//!
-//!     // Create the material
-//!     let material = TriplanarVoxelMaterial {
-//!         base: StandardMaterial::default(),
-//!         extension: TriplanarExtension::new(palette_handle),
-//!     };
-//!
-//!     // Spawn the mesh
-//!     commands.spawn((
-//!         Mesh3d(meshes.add(mesh)),
-//!         MeshMaterial3d(materials.add(material)),
-//!     ));
-//! }
-//! ```
+//! - **Triplanar mapping**: No UV coordinates needed - textures projected from world space
+//! - **Multi-material blending**: Up to 4 materials blended per vertex
+//! - **Texture arrays**: Efficient GPU texture atlas for material palettes
+//! - **PBR support**: Optional normal and ARM (AO/Roughness/Metallic) maps
+//! - **Per-material properties**: Individual texture scale and blend sharpness
 
 pub mod material;
 pub mod mesh;
@@ -76,8 +25,8 @@ pub mod prelude {
         MeshTriplanarExt, TriplanarMeshBuilder, VertexMaterialData, ATTRIBUTE_MATERIAL_IDS,
         ATTRIBUTE_MATERIAL_WEIGHTS,
     };
-    pub use crate::palette::{
-        PaletteBuilder, PaletteMaterial, PaletteValidationError, TexturePalette, MAX_MATERIALS,
-    };
+    pub use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
     pub use crate::TriplanarVoxelPlugin;
 }
+/// Shader asset path (embedded).
+const TRIPLANAR_SHADER_PATH: &str = "embedded://bevy-painter/material/shaders/triplanar_extension.wgsl";

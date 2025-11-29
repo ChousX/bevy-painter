@@ -2,17 +2,19 @@
 
 use bevy::ecs::system::{lifetimeless::SRes, SystemParamItem};
 use bevy::mesh::MeshVertexBufferLayoutRef;
-use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline, StandardMaterial};
+use bevy::pbr::{
+    ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
+    StandardMaterial,
+};
 use bevy::prelude::*;
 use bevy::render::{
     render_asset::RenderAssets,
     render_resource::{
         binding_types::{sampler, storage_buffer_read_only, texture_2d_array, uniform_buffer},
-        AsBindGroup, AsBindGroupError, BindGroupEntries, BindGroupLayout,
-        BindGroupLayoutEntries, BindGroupLayoutEntry, BindingResources, BufferInitDescriptor,
-        BufferUsages, PreparedBindGroup, RenderPipelineDescriptor, SamplerBindingType,
-        ShaderStages, ShaderType, SpecializedMeshPipelineError, TextureSampleType,
-        UnpreparedBindGroup,
+        AsBindGroup, AsBindGroupError, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntries,
+        BindGroupLayoutEntry, BindingResources, BufferInitDescriptor, BufferUsages,
+        PreparedBindGroup, RenderPipelineDescriptor, SamplerBindingType, ShaderStages, ShaderType,
+        SpecializedMeshPipelineError, TextureSampleType, UnpreparedBindGroup,
     },
     renderer::RenderDevice,
     texture::{FallbackImage, GpuImage},
@@ -21,10 +23,10 @@ use bevy::shader::ShaderRef;
 use bytemuck::{Pod, Zeroable};
 
 use crate::mesh::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
-use crate::palette::{MaterialPropertiesGpu, TexturePalette, MAX_MATERIALS};
+use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
 
-/// Shader asset path.
-const TRIPLANAR_SHADER_PATH: &str = "shaders/triplanar_extension.wgsl";
+/// Shader asset path (embedded).
+const TRIPLANAR_SHADER_PATH: &str =  "embedded://src/shaders/triplanar_extension.wgsl";
 
 /// Convenience type alias for the complete triplanar voxel material.
 pub type TriplanarVoxelMaterial = ExtendedMaterial<StandardMaterial, TriplanarExtension>;
@@ -50,10 +52,22 @@ impl TriplanarSettings {
 }
 
 /// Material extension that adds triplanar mapping and multi-material blending.
+///
+/// This extension stores texture handles directly rather than referencing a palette,
+/// making it self-contained for the render world.
 #[derive(Asset, TypePath, Clone, Debug)]
 pub struct TriplanarExtension {
-    /// The texture palette containing all material textures.
-    pub palette: Handle<TexturePalette>,
+    /// Albedo texture array (required).
+    pub albedo: Handle<Image>,
+
+    /// Normal map texture array (optional).
+    pub normal: Option<Handle<Image>>,
+
+    /// ARM (AO/Roughness/Metallic) texture array (optional).
+    pub arm: Option<Handle<Image>>,
+
+    /// Per-material properties.
+    pub material_properties: Vec<MaterialPropertiesGpu>,
 
     /// Global texture scale multiplier (default: 1.0).
     pub texture_scale: f32,
@@ -71,7 +85,10 @@ pub struct TriplanarExtension {
 impl Default for TriplanarExtension {
     fn default() -> Self {
         Self {
-            palette: Handle::default(),
+            albedo: Handle::default(),
+            normal: None,
+            arm: None,
+            material_properties: Vec::new(),
             texture_scale: 1.0,
             blend_sharpness: 4.0,
             use_biplanar_color: true,
@@ -81,12 +98,44 @@ impl Default for TriplanarExtension {
 }
 
 impl TriplanarExtension {
-    /// Create a new triplanar extension with a palette.
-    pub fn new(palette: Handle<TexturePalette>) -> Self {
+    /// Create a new triplanar extension with an albedo texture array.
+    pub fn new(albedo: Handle<Image>) -> Self {
         Self {
-            palette,
+            albedo,
             ..default()
         }
+    }
+
+    /// Set the normal map texture array.
+    pub fn with_normal(mut self, normal: Handle<Image>) -> Self {
+        self.normal = Some(normal);
+        self
+    }
+
+    /// Set the ARM texture array.
+    pub fn with_arm(mut self, arm: Handle<Image>) -> Self {
+        self.arm = Some(arm);
+        self
+    }
+
+    /// Set material properties.
+    pub fn with_material_properties(mut self, properties: Vec<MaterialPropertiesGpu>) -> Self {
+        self.material_properties = properties;
+        self
+    }
+
+    /// Add a material with default properties.
+    pub fn with_material(mut self) -> Self {
+        self.material_properties.push(MaterialPropertiesGpu::default());
+        self
+    }
+
+    /// Add multiple materials with default properties.
+    pub fn with_materials(mut self, count: usize) -> Self {
+        for _ in 0..count {
+            self.material_properties.push(MaterialPropertiesGpu::default());
+        }
+        self
     }
 
     /// Set the global texture scale.
@@ -113,71 +162,54 @@ impl TriplanarExtension {
         self
     }
 
-    /// Build GPU settings from this extension and palette.
-    pub fn build_settings(&self, palette: Option<&TexturePalette>) -> TriplanarSettings {
+    /// Build GPU settings from this extension.
+    pub fn build_settings(&self) -> TriplanarSettings {
         let mut flags = 0u32;
 
         if self.use_biplanar_color {
             flags |= TriplanarSettings::FLAG_USE_BIPLANAR;
         }
 
-        let has_normals = palette.map(|p| p.has_normal_maps()).unwrap_or(false);
-        if self.enable_normal_maps && has_normals {
+        if self.enable_normal_maps && self.normal.is_some() {
             flags |= TriplanarSettings::FLAG_ENABLE_NORMALS;
         }
 
-        let has_arm = palette.map(|p| p.has_arm()).unwrap_or(false);
-        if has_arm {
+        if self.arm.is_some() {
             flags |= TriplanarSettings::FLAG_HAS_ARM;
         }
-
-        let material_count = palette.map(|p| p.material_count() as u32).unwrap_or(0);
 
         TriplanarSettings {
             texture_scale: self.texture_scale,
             blend_sharpness: self.blend_sharpness,
             flags,
-            material_count,
+            material_count: self.material_properties.len().max(1) as u32,
         }
     }
 }
 
 impl AsBindGroup for TriplanarExtension {
     type Data = ();
-    type Param = (
-        SRes<RenderAssets<GpuImage>>,
-        SRes<Assets<TexturePalette>>,
-        SRes<FallbackImage>,
-    );
+    type Param = (SRes<RenderAssets<GpuImage>>, SRes<FallbackImage>);
 
     fn as_bind_group(
         &self,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
-        (gpu_images, palettes, fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
+        (gpu_images, fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
     ) -> Result<PreparedBindGroup, AsBindGroupError> {
-        // Get the palette
-        let palette = palettes.get(&self.palette);
-
         // Get albedo texture (required)
-        let albedo_handle = palette.map(|p| &p.albedo);
-        let albedo_image = albedo_handle
-            .and_then(|h| gpu_images.get(h))
+        let albedo_image = gpu_images
+            .get(&self.albedo)
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
 
         // Get optional textures, falling back to 2D array fallback
         let fallback = &fallback_image.d2_array;
 
-        let normal_image = palette
-            .and_then(|p| p.normal.as_ref())
-            .and_then(|h| gpu_images.get(h));
-
-        let arm_image = palette
-            .and_then(|p| p.arm.as_ref())
-            .and_then(|h| gpu_images.get(h));
+        let normal_image = self.normal.as_ref().and_then(|h| gpu_images.get(h));
+        let arm_image = self.arm.as_ref().and_then(|h| gpu_images.get(h));
 
         // Build settings uniform
-        let settings = self.build_settings(palette);
+        let settings = self.build_settings();
         let settings_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("triplanar_settings"),
             contents: bytemuck::bytes_of(&settings),
@@ -186,11 +218,14 @@ impl AsBindGroup for TriplanarExtension {
 
         // Build material properties storage buffer
         let mut material_props = [MaterialPropertiesGpu::default(); MAX_MATERIALS];
-        if let Some(p) = palette {
-            for (i, mat) in p.materials.iter().enumerate().take(MAX_MATERIALS) {
-                material_props[i] = MaterialPropertiesGpu::from(mat);
-            }
+        for (i, props) in self.material_properties.iter().enumerate().take(MAX_MATERIALS) {
+            material_props[i] = *props;
         }
+        // If no properties defined, use at least one default
+        if self.material_properties.is_empty() {
+            material_props[0] = MaterialPropertiesGpu::default();
+        }
+
         let props_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("triplanar_material_props"),
             contents: bytemuck::cast_slice(&material_props),
@@ -308,13 +343,12 @@ impl MaterialExtension for TriplanarExtension {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // Define the vertex layout including our custom attributes
+        // Define the vertex layout - only what we need for triplanar (no UVs!)
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
-            Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
-            ATTRIBUTE_MATERIAL_IDS.at_shader_location(3),
-            ATTRIBUTE_MATERIAL_WEIGHTS.at_shader_location(4),
+            ATTRIBUTE_MATERIAL_IDS.at_shader_location(2),
+            ATTRIBUTE_MATERIAL_WEIGHTS.at_shader_location(3),
         ])?;
 
         descriptor.vertex.buffers = vec![vertex_layout];
@@ -343,23 +377,24 @@ mod tests {
             .with_texture_scale(2.0)
             .with_blend_sharpness(8.0)
             .with_biplanar_color(false)
-            .with_normal_maps(false);
+            .with_normal_maps(false)
+            .with_materials(4);
 
         assert_eq!(ext.texture_scale, 2.0);
         assert_eq!(ext.blend_sharpness, 8.0);
         assert!(!ext.use_biplanar_color);
         assert!(!ext.enable_normal_maps);
+        assert_eq!(ext.material_properties.len(), 4);
     }
 
     #[test]
-    fn test_settings_flags_no_palette() {
+    fn test_settings_flags() {
         let ext = TriplanarExtension::default();
-        let settings = ext.build_settings(None);
+        let settings = ext.build_settings();
 
         assert!(settings.flags & TriplanarSettings::FLAG_USE_BIPLANAR != 0);
-        assert!(settings.flags & TriplanarSettings::FLAG_ENABLE_NORMALS == 0);
+        assert!(settings.flags & TriplanarSettings::FLAG_ENABLE_NORMALS == 0); // No normal texture
         assert!(settings.flags & TriplanarSettings::FLAG_HAS_ARM == 0);
-        assert_eq!(settings.material_count, 0);
     }
 
     #[test]
@@ -368,7 +403,7 @@ mod tests {
             .with_texture_scale(2.5)
             .with_blend_sharpness(6.0);
 
-        let settings = ext.build_settings(None);
+        let settings = ext.build_settings();
 
         assert_eq!(settings.texture_scale, 2.5);
         assert_eq!(settings.blend_sharpness, 6.0);

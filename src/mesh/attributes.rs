@@ -9,8 +9,8 @@ use bevy::render::render_resource::VertexFormat;
 /// Unused slots should be set to 0.
 ///
 /// # Shader Location
-/// This attribute is bound to location 3 in the vertex shader.
-/// (After position=0, normal=1, uv=2)
+/// This attribute is bound to location 2 in the vertex shader.
+/// (After position=0, normal=1)
 ///
 /// # Example
 /// ```ignore
@@ -26,8 +26,8 @@ pub const ATTRIBUTE_MATERIAL_IDS: MeshVertexAttribute =
 /// though the shader will normalize them if they don't.
 ///
 /// # Shader Location
-/// This attribute is bound to location 4 in the vertex shader.
-/// (After position=0, normal=1, uv=2, material_ids=3)
+/// This attribute is bound to location 3 in the vertex shader.
+/// (After position=0, normal=1, material_ids=2)
 ///
 /// # Example
 /// ```ignore

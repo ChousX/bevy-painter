@@ -1,16 +1,13 @@
 //! Plugin for triplanar voxel materials.
-
 use bevy::prelude::*;
 
-use crate::material::{validate_palettes, TriplanarMaterialSystems, TriplanarVoxelMaterial};
-use crate::palette::TexturePalette;
+use crate::material::TriplanarVoxelMaterial;
 
 /// Plugin that adds triplanar voxel material support to Bevy.
 ///
 /// This plugin registers:
-/// - [`TexturePalette`] as an asset type
 /// - [`TriplanarVoxelMaterial`] as a material type
-/// - Palette validation systems
+/// - Embedded shader assets
 ///
 /// # Example
 /// ```ignore
@@ -26,15 +23,10 @@ pub struct TriplanarVoxelPlugin;
 
 impl Plugin for TriplanarVoxelPlugin {
     fn build(&self, app: &mut App) {
+        // Embed the shader into the binary
+        crate::material::register_embedded_assets(app);
         app
-            // Register assets
-            .init_asset::<TexturePalette>()
-            // Register material
-            .add_plugins(MaterialPlugin::<TriplanarVoxelMaterial>::default())
-            // Add validation systems
-            .add_systems(
-                Update,
-                validate_palettes.in_set(TriplanarMaterialSystems),
-            );
+            // Register material (includes shader loading)
+            .add_plugins(MaterialPlugin::<TriplanarVoxelMaterial>::default());
     }
 }

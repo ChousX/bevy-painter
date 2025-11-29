@@ -2,7 +2,6 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
-use bevy::prelude::*;
 
 use super::{
     attributes::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS},
@@ -14,6 +13,9 @@ use super::{
 /// This builder collects vertex data (positions, normals, material data)
 /// and produces a Bevy [`Mesh`] with the custom vertex attributes required
 /// by [`TriplanarVoxelMaterial`](crate::material::TriplanarVoxelMaterial).
+///
+/// Note: UV coordinates are not used - triplanar mapping derives texture
+/// coordinates from world position.
 ///
 /// # Example
 /// ```ignore
@@ -30,7 +32,6 @@ use super::{
 pub struct TriplanarMeshBuilder {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
-    uvs: Vec<[f32; 2]>,
     material_ids: Vec<u32>,
     material_weights: Vec<u32>,
     indices: Option<Vec<u32>>,
@@ -51,7 +52,6 @@ impl TriplanarMeshBuilder {
         Self {
             positions: Vec::with_capacity(vertex_count),
             normals: Vec::with_capacity(vertex_count),
-            uvs: Vec::with_capacity(vertex_count),
             material_ids: Vec::with_capacity(vertex_count),
             material_weights: Vec::with_capacity(vertex_count),
             indices: Some(Vec::with_capacity(index_count)),
@@ -125,38 +125,6 @@ impl TriplanarMeshBuilder {
 
         self.positions.push(position);
         self.normals.push(normal);
-        // Generate simple UVs (can be overridden or ignored by triplanar)
-        self.uvs.push([0.0, 0.0]);
-        self.material_ids.push(material_data.pack_ids());
-        self.material_weights.push(material_data.pack_weights());
-    }
-
-    /// Add a vertex with explicit UV coordinates.
-    pub fn push_vertex_with_uv(
-        &mut self,
-        position: [f32; 3],
-        normal: [f32; 3],
-        uv: [f32; 2],
-        material_data: VertexMaterialData,
-    ) {
-        #[cfg(debug_assertions)]
-        if let Some(max_id) = self.max_material_id {
-            for (i, &id) in material_data.ids.iter().enumerate() {
-                if material_data.weights[i] > 0 {
-                    debug_assert!(
-                        id <= max_id,
-                        "Material ID {} exceeds maximum {} at vertex {:?}",
-                        id,
-                        max_id,
-                        position
-                    );
-                }
-            }
-        }
-
-        self.positions.push(position);
-        self.normals.push(normal);
-        self.uvs.push(uv);
         self.material_ids.push(material_data.pack_ids());
         self.material_weights.push(material_data.pack_weights());
     }
@@ -211,7 +179,6 @@ impl TriplanarMeshBuilder {
 
         mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
         mesh.insert_attribute(ATTRIBUTE_MATERIAL_IDS, self.material_ids);
         mesh.insert_attribute(ATTRIBUTE_MATERIAL_WEIGHTS, self.material_weights);
         mesh.insert_indices(Indices::U32(indices));
@@ -295,9 +262,10 @@ mod tests {
 
         assert!(mesh.attribute(Mesh::ATTRIBUTE_POSITION).is_some());
         assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
-        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_some());
         assert!(mesh.attribute(ATTRIBUTE_MATERIAL_IDS).is_some());
         assert!(mesh.attribute(ATTRIBUTE_MATERIAL_WEIGHTS).is_some());
+        // No UVs - triplanar doesn't need them
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none());
     }
 
     #[test]
@@ -312,7 +280,6 @@ mod tests {
 
     #[test]
     fn test_mesh_extension() {
-        // Create a mesh with positions, normals, and UVs
         let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
