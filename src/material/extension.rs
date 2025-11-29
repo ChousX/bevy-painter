@@ -26,7 +26,7 @@ use crate::mesh::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
 use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
 
 /// Shader asset path (embedded).
-const TRIPLANAR_SHADER_PATH: &str =  "embedded://src/shaders/triplanar_extension.wgsl";
+const TRIPLANAR_SHADER_PATH: &str =  "embedded://bevy-painter/material/shaders/triplanar_extension.wgsl";
 
 /// Convenience type alias for the complete triplanar voxel material.
 pub type TriplanarVoxelMaterial = ExtendedMaterial<StandardMaterial, TriplanarExtension>;
