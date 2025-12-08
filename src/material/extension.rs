@@ -2,6 +2,7 @@
 
 use bevy::ecs::system::{lifetimeless::SRes, SystemParamItem};
 use bevy::mesh::MeshVertexBufferLayoutRef;
+use bevy::render::render_resource::{OwnedBindingResource, TextureViewDimension};
 use bevy::pbr::{
     ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline,
     StandardMaterial,
@@ -26,8 +27,7 @@ use crate::mesh::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
 use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
 
 /// Shader asset path (embedded).
-const TRIPLANAR_SHADER_PATH: &str =  "embedded://bevy-painter/material/shaders/triplanar_extension.wgsl";
-
+const TRIPLANAR_SHADER_PATH: &str = "embedded://bevy_painter/material/shaders/triplanar_extension.wgsl";
 /// Convenience type alias for the complete triplanar voxel material.
 pub type TriplanarVoxelMaterial = ExtendedMaterial<StandardMaterial, TriplanarExtension>;
 
@@ -191,12 +191,17 @@ impl AsBindGroup for TriplanarExtension {
     type Data = ();
     type Param = (SRes<RenderAssets<GpuImage>>, SRes<FallbackImage>);
 
-    fn as_bind_group(
+    fn bind_group_data(&self) -> Self::Data {}
+
+    fn unprepared_bind_group(
         &self,
-        layout: &BindGroupLayout,
+        _layout: &BindGroupLayout,
         render_device: &RenderDevice,
         (gpu_images, fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
-    ) -> Result<PreparedBindGroup, AsBindGroupError> {
+        _force_no_bindless: bool,
+    ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
+        use bevy::render::render_resource::OwnedBindingResource;
+
         // Get albedo texture (required)
         let albedo_image = gpu_images
             .get(&self.albedo)
@@ -221,7 +226,6 @@ impl AsBindGroup for TriplanarExtension {
         for (i, props) in self.material_properties.iter().enumerate().take(MAX_MATERIALS) {
             material_props[i] = *props;
         }
-        // If no properties defined, use at least one default
         if self.material_properties.is_empty() {
             material_props[0] = MaterialPropertiesGpu::default();
         }
@@ -232,50 +236,40 @@ impl AsBindGroup for TriplanarExtension {
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         });
 
-        // Create bind group - entries must be in same order as layout entries
-        let bind_group = render_device.create_bind_group(
-            Some("triplanar_extension_bind_group"),
-            layout,
-            &BindGroupEntries::sequential((
-                // Binding 100: Settings uniform
-                settings_buffer.as_entire_binding(),
-                // Binding 101: Albedo texture array
-                &albedo_image.texture_view,
-                // Binding 102: Albedo sampler
-                &albedo_image.sampler,
-                // Binding 103: Material properties storage
-                props_buffer.as_entire_binding(),
-                // Binding 104: Normal texture array (or fallback)
-                normal_image
-                    .map(|i| &i.texture_view)
-                    .unwrap_or(&fallback.texture_view),
-                // Binding 105: Normal sampler (or fallback)
-                normal_image
-                    .map(|i| &i.sampler)
-                    .unwrap_or(&fallback.sampler),
-                // Binding 106: ARM texture array (or fallback)
-                arm_image
-                    .map(|i| &i.texture_view)
-                    .unwrap_or(&fallback.texture_view),
-                // Binding 107: ARM sampler (or fallback)
-                arm_image.map(|i| &i.sampler).unwrap_or(&fallback.sampler),
-            )),
-        );
-
-        Ok(PreparedBindGroup {
-            bindings: BindingResources(vec![]),
-            bind_group,
-        })
-    }
-
-    fn unprepared_bind_group(
-        &self,
-        _layout: &BindGroupLayout,
-        _render_device: &RenderDevice,
-        _param: &mut SystemParamItem<'_, '_, Self::Param>,
-        _force_no_bindless: bool,
-    ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
-        Err(AsBindGroupError::CreateBindGroupDirectly)
+        Ok(UnpreparedBindGroup {
+    bindings: BindingResources(vec![
+        (100, OwnedBindingResource::Buffer(settings_buffer)),
+        (101, OwnedBindingResource::TextureView(
+            TextureViewDimension::D2Array,
+            albedo_image.texture_view.clone()
+        )),
+        (102, OwnedBindingResource::Sampler(
+            SamplerBindingType::Filtering,
+            albedo_image.sampler.clone()
+        )),
+        (103, OwnedBindingResource::Buffer(props_buffer)),
+        (104, OwnedBindingResource::TextureView(
+            TextureViewDimension::D2Array,
+            normal_image.map(|i| i.texture_view.clone())
+                .unwrap_or_else(|| fallback.texture_view.clone())
+        )),
+        (105, OwnedBindingResource::Sampler(
+            SamplerBindingType::Filtering,
+            normal_image.map(|i| i.sampler.clone())
+                .unwrap_or_else(|| fallback.sampler.clone())
+        )),
+        (106, OwnedBindingResource::TextureView(
+            TextureViewDimension::D2Array,
+            arm_image.map(|i| i.texture_view.clone())
+                .unwrap_or_else(|| fallback.texture_view.clone())
+        )),
+        (107, OwnedBindingResource::Sampler(
+            SamplerBindingType::Filtering,
+            arm_image.map(|i| i.sampler.clone())
+                .unwrap_or_else(|| fallback.sampler.clone())
+        )),
+    ]),
+})
     }
 
     fn bind_group_layout_entries(
@@ -289,37 +283,23 @@ impl AsBindGroup for TriplanarExtension {
             ShaderStages::VERTEX_FRAGMENT,
             (
                 (100, uniform_buffer::<TriplanarSettings>(false)),
-                (
-                    101,
-                    texture_2d_array(TextureSampleType::Float { filterable: true }),
-                ),
+                (101, texture_2d_array(TextureSampleType::Float { filterable: true })),
                 (102, sampler(SamplerBindingType::Filtering)),
-                (
-                    103,
-                    storage_buffer_read_only::<[MaterialPropertiesGpu; MAX_MATERIALS]>(false),
-                ),
-                (
-                    104,
-                    texture_2d_array(TextureSampleType::Float { filterable: true }),
-                ),
+                (103, storage_buffer_read_only::<[MaterialPropertiesGpu; MAX_MATERIALS]>(false)),
+                (104, texture_2d_array(TextureSampleType::Float { filterable: true })),
                 (105, sampler(SamplerBindingType::Filtering)),
-                (
-                    106,
-                    texture_2d_array(TextureSampleType::Float { filterable: true }),
-                ),
+                (106, texture_2d_array(TextureSampleType::Float { filterable: true })),
                 (107, sampler(SamplerBindingType::Filtering)),
             ),
         )
         .to_vec()
     }
 
-    fn bind_group_data(&self) -> Self::Data {}
-
     fn label() -> Option<&'static str> {
         Some("triplanar_extension")
     }
-}
 
+}
 impl MaterialExtension for TriplanarExtension {
     fn vertex_shader() -> ShaderRef {
         TRIPLANAR_SHADER_PATH.into()
