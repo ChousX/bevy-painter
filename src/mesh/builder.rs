@@ -2,7 +2,6 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, Mesh, PrimitiveTopology};
-use bevy::prelude::*;
 
 use super::{
     attributes::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS},
@@ -14,6 +13,9 @@ use super::{
 /// This builder collects vertex data (positions, normals, material data)
 /// and produces a Bevy [`Mesh`] with the custom vertex attributes required
 /// by [`TriplanarVoxelMaterial`](crate::material::TriplanarVoxelMaterial).
+///
+/// Note: UV coordinates are not used - triplanar mapping derives texture
+/// coordinates from world position.
 ///
 /// # Example
 /// ```ignore
@@ -262,28 +264,38 @@ mod tests {
         assert!(mesh.attribute(Mesh::ATTRIBUTE_NORMAL).is_some());
         assert!(mesh.attribute(ATTRIBUTE_MATERIAL_IDS).is_some());
         assert!(mesh.attribute(ATTRIBUTE_MATERIAL_WEIGHTS).is_some());
+        // No UVs - triplanar doesn't need them
+        assert!(mesh.attribute(Mesh::ATTRIBUTE_UV_0).is_none());
     }
 
     #[test]
     fn test_builder_empty_returns_none() {
         assert!(TriplanarMeshBuilder::new().build().is_none());
 
-        assert!(
-            TriplanarMeshBuilder::new()
-                .with_vertex_single([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
-                .build()
-                .is_none()
-        ); // No indices
+        assert!(TriplanarMeshBuilder::new()
+            .with_vertex_single([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
+            .build()
+            .is_none()); // No indices
     }
 
     #[test]
     fn test_mesh_extension() {
-        let mesh = Mesh::new(
+        let mut mesh = Mesh::new(
             PrimitiveTopology::TriangleList,
             RenderAssetUsages::default(),
         );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.5, 1.0, 0.0]],
+        );
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_NORMAL,
+            vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+        );
 
-        // Would need to add positions first in real usage
-        // This test just verifies the API compiles
+        let mesh = mesh.with_uniform_material(2);
+
+        assert!(mesh.attribute(ATTRIBUTE_MATERIAL_IDS).is_some());
+        assert!(mesh.attribute(ATTRIBUTE_MATERIAL_WEIGHTS).is_some());
     }
 }

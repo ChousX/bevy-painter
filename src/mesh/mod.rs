@@ -8,5 +8,5 @@ mod builder;
 mod vertex_data;
 
 pub use attributes::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
-pub use builder::TriplanarMeshBuilder;
+pub use builder::{MeshTriplanarExt, TriplanarMeshBuilder};
 pub use vertex_data::VertexMaterialData;

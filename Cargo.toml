@@ -11,7 +11,7 @@ default = []
 debug_viz = []
 
 [dependencies]
-bevy = { version = "0.17", default-features = false, features = [
+bevy = { version = "0.17", default-features = true, features = [
     "bevy_asset",
     "bevy_render",
     "bevy_pbr",
