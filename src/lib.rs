@@ -67,17 +67,30 @@ pub mod mesh;
 pub mod palette;
 mod plugin;
 
-pub use plugin::TriplanarVoxelPlugin;
 
-/// Prelude module with commonly used types.
+/// Per-voxel material storage for terrain texturing.
+///
+/// Integrates with `bevy-sculpter` meshes. Enable with:
+/// ```toml
+/// bevy-painter = { version = "...", features = ["material_field"] }
+/// ```
+#[cfg(feature = "material_field")]
+pub mod material_field;
+
+// In your existing prelude, add:
 pub mod prelude {
     pub use crate::material::{TriplanarExtension, TriplanarSettings, TriplanarVoxelMaterial};
     pub use crate::mesh::{
         MeshTriplanarExt, TriplanarMeshBuilder, VertexMaterialData, ATTRIBUTE_MATERIAL_IDS,
         ATTRIBUTE_MATERIAL_WEIGHTS,
     };
-    pub use crate::palette::{
-        PaletteBuilder, PaletteMaterial, PaletteValidationError, TexturePalette, MAX_MATERIALS,
+    pub use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
+    pub use crate::plugin::TriplanarVoxelPlugin;
+
+    #[cfg(feature = "material_field")]
+    pub use crate::material_field::{
+        add_material_attributes, add_material_attributes_with, fill_by_steepness,
+        fill_height_layers, paint_sphere, paint_surface, BlendConfig, MaterialField,
     };
-    pub use crate::TriplanarVoxelPlugin;
 }
+
