@@ -9,6 +9,7 @@ categories = ["game-development", "rendering::graphics-api"]
 [features]
 default = []
 debug_viz = []
+material_field = ["bevy-sculpter"]
 
 [dependencies]
 bevy = { version = "0.17", default-features = true, features = [
@@ -21,6 +22,4 @@ bevy = { version = "0.17", default-features = true, features = [
 ]}
 bytemuck = "1.24.0"
 thiserror = "2"
-
-[dev-dependencies]
-bevy = { version = "0.17" }
+bevy-sculpter = {version = "0.1", optional = true}

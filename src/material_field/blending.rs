@@ -1,10 +1,9 @@
 //! Material blending logic based on density values.
 
 use bevy::prelude::*;
-use bevy_sculpter::prelude::DensityField;
+use bevy_sculpter::prelude::{DensityField, NeighborDensityFields};
 
-use super::field::{MaterialField, FIELD_SIZE};
-use super::neighbor::{NeighborFace, NeighborMaterialFields};
+use super::{FIELD_SIZE, MaterialField, NeighborMaterialFields};
 use crate::mesh::VertexMaterialData;
 
 /// Settings for material blending at vertices.
@@ -31,15 +30,15 @@ impl Default for MaterialBlendSettings {
 }
 
 /// Offsets to the 8 corners of a voxel cube.
-const CORNER_OFFSETS: [[i32; 3]; 8] = [
-    [0, 0, 0],
-    [1, 0, 0],
-    [0, 1, 0],
-    [1, 1, 0],
-    [0, 0, 1],
-    [1, 0, 1],
-    [0, 1, 1],
-    [1, 1, 1],
+const CORNER_OFFSETS: [IVec3; 8] = [
+    IVec3::new(0, 0, 0),
+    IVec3::new(1, 0, 0),
+    IVec3::new(0, 1, 0),
+    IVec3::new(1, 1, 0),
+    IVec3::new(0, 0, 1),
+    IVec3::new(1, 0, 1),
+    IVec3::new(0, 1, 1),
+    IVec3::new(1, 1, 1),
 ];
 
 /// Computes material blend data for a vertex at the given world position.
@@ -51,24 +50,23 @@ pub fn compute_vertex_materials(
     mesh_size: Vec3,
     density_field: &DensityField,
     material_field: &MaterialField,
-    neighbor_densities: Option<&bevy_sculpter::neighbor::NeighborDensityFields>,
+    neighbor_densities: Option<&NeighborDensityFields>,
     neighbor_materials: Option<&NeighborMaterialFields>,
     settings: &MaterialBlendSettings,
 ) -> VertexMaterialData {
     let scale = FIELD_SIZE.as_vec3() / mesh_size;
     let grid_pos = world_pos * scale;
-
-    // Find the base voxel (floor of grid position)
     let base = grid_pos.floor().as_ivec3();
+    let field_size = FIELD_SIZE.as_ivec3();
 
     // Collect materials and their weights from 8 surrounding voxels
     let mut contributions: Vec<(u8, f32)> = Vec::with_capacity(8);
 
     for offset in &CORNER_OFFSETS {
-        let voxel = base + IVec3::from_slice(offset);
+        let voxel = base + *offset;
 
-        let density = sample_density(voxel, density_field, neighbor_densities);
-        let material = sample_material(voxel, material_field, neighbor_materials);
+        let density = sample_density(voxel, density_field, neighbor_densities, field_size);
+        let material = sample_material(voxel, material_field, neighbor_materials, field_size);
 
         // Convert density to weight: more negative = more "inside" = higher weight
         // Only interior voxels (negative density) contribute
@@ -83,7 +81,7 @@ pub fn compute_vertex_materials(
     // If no interior voxels, use nearest voxel's material
     if contributions.is_empty() {
         let nearest = grid_pos.round().as_ivec3();
-        let material = sample_material(nearest, material_field, neighbor_materials);
+        let material = sample_material(nearest, material_field, neighbor_materials, field_size);
         return VertexMaterialData::single(material);
     }
 
@@ -95,23 +93,27 @@ pub fn compute_vertex_materials(
 }
 
 /// Samples density at a voxel coordinate, handling neighbor lookups.
+#[inline]
 fn sample_density(
     voxel: IVec3,
     field: &DensityField,
-    neighbors: Option<&bevy_sculpter::neighbor::NeighborDensityFields>,
+    neighbors: Option<&NeighborDensityFields>,
+    field_size: IVec3,
 ) -> f32 {
-    let size = FIELD_SIZE.as_ivec3();
-
     // In bounds - direct sample
-    if voxel.x >= 0 && voxel.y >= 0 && voxel.z >= 0 
-        && voxel.x < size.x && voxel.y < size.y && voxel.z < size.z 
+    if voxel.x >= 0
+        && voxel.y >= 0
+        && voxel.z >= 0
+        && voxel.x < field_size.x
+        && voxel.y < field_size.y
+        && voxel.z < field_size.z
     {
         return field.get(voxel.x as u32, voxel.y as u32, voxel.z as u32);
     }
 
-    // Try neighbor lookup
+    // Try neighbor lookup using the generic sample method
     if let Some(neighbors) = neighbors {
-        if let Some(density) = sample_density_neighbor(voxel, neighbors) {
+        if let Some(density) = neighbors.sample(voxel, field_size) {
             return density;
         }
     }
@@ -120,143 +122,34 @@ fn sample_density(
     1.0
 }
 
-/// Samples density from neighbor fields.
-fn sample_density_neighbor(
-    voxel: IVec3,
-    neighbors: &bevy_sculpter::neighbor::NeighborDensityFields,
-) -> Option<f32> {
-    let size = FIELD_SIZE.as_ivec3();
-
-    // -X neighbor
-    if voxel.x < 0 && voxel.y >= 0 && voxel.z >= 0 && voxel.y < size.y && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::NegX as usize] {
-            let depth = (-1 - voxel.x) as u32;
-            return Some(slice.get(voxel.y as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // +X neighbor
-    if voxel.x >= size.x && voxel.y >= 0 && voxel.z >= 0 && voxel.y < size.y && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::PosX as usize] {
-            let depth = (voxel.x - size.x) as u32;
-            return Some(slice.get(voxel.y as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // -Y neighbor
-    if voxel.y < 0 && voxel.x >= 0 && voxel.z >= 0 && voxel.x < size.x && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::NegY as usize] {
-            let depth = (-1 - voxel.y) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // +Y neighbor
-    if voxel.y >= size.y && voxel.x >= 0 && voxel.z >= 0 && voxel.x < size.x && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::PosY as usize] {
-            let depth = (voxel.y - size.y) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // -Z neighbor
-    if voxel.z < 0 && voxel.x >= 0 && voxel.y >= 0 && voxel.x < size.x && voxel.y < size.y {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::NegZ as usize] {
-            let depth = (-1 - voxel.z) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.y as u32, depth));
-        }
-    }
-
-    // +Z neighbor
-    if voxel.z >= size.z && voxel.x >= 0 && voxel.y >= 0 && voxel.x < size.x && voxel.y < size.y {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::PosZ as usize] {
-            let depth = (voxel.z - size.z) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.y as u32, depth));
-        }
-    }
-
-    None
-}
-
 /// Samples material at a voxel coordinate, handling neighbor lookups.
+#[inline]
 fn sample_material(
     voxel: IVec3,
     field: &MaterialField,
     neighbors: Option<&NeighborMaterialFields>,
+    field_size: IVec3,
 ) -> u8 {
-    let size = FIELD_SIZE.as_ivec3();
-
     // In bounds - direct sample
-    if voxel.x >= 0 && voxel.y >= 0 && voxel.z >= 0 
-        && voxel.x < size.x && voxel.y < size.y && voxel.z < size.z 
+    if voxel.x >= 0
+        && voxel.y >= 0
+        && voxel.z >= 0
+        && voxel.x < field_size.x
+        && voxel.y < field_size.y
+        && voxel.z < field_size.z
     {
         return field.get(voxel.x as u32, voxel.y as u32, voxel.z as u32);
     }
 
-    // Try neighbor lookup
+    // Try neighbor lookup using the generic sample method
     if let Some(neighbors) = neighbors {
-        if let Some(material) = sample_material_neighbor(voxel, neighbors) {
+        if let Some(material) = neighbors.sample(voxel, field_size) {
             return material;
         }
     }
 
     // Out of bounds - return default material
     0
-}
-
-/// Samples material from neighbor fields.
-fn sample_material_neighbor(voxel: IVec3, neighbors: &NeighborMaterialFields) -> Option<u8> {
-    let size = FIELD_SIZE.as_ivec3();
-
-    // -X neighbor
-    if voxel.x < 0 && voxel.y >= 0 && voxel.z >= 0 && voxel.y < size.y && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::NegX as usize] {
-            let depth = (-1 - voxel.x) as u32;
-            return Some(slice.get(voxel.y as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // +X neighbor
-    if voxel.x >= size.x && voxel.y >= 0 && voxel.z >= 0 && voxel.y < size.y && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::PosX as usize] {
-            let depth = (voxel.x - size.x) as u32;
-            return Some(slice.get(voxel.y as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // -Y neighbor
-    if voxel.y < 0 && voxel.x >= 0 && voxel.z >= 0 && voxel.x < size.x && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::NegY as usize] {
-            let depth = (-1 - voxel.y) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // +Y neighbor
-    if voxel.y >= size.y && voxel.x >= 0 && voxel.z >= 0 && voxel.x < size.x && voxel.z < size.z {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::PosY as usize] {
-            let depth = (voxel.y - size.y) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.z as u32, depth));
-        }
-    }
-
-    // -Z neighbor
-    if voxel.z < 0 && voxel.x >= 0 && voxel.y >= 0 && voxel.x < size.x && voxel.y < size.y {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::NegZ as usize] {
-            let depth = (-1 - voxel.z) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.y as u32, depth));
-        }
-    }
-
-    // +Z neighbor
-    if voxel.z >= size.z && voxel.x >= 0 && voxel.y >= 0 && voxel.x < size.x && voxel.y < size.y {
-        if let Some(ref slice) = neighbors.neighbors[NeighborFace::PosZ as usize] {
-            let depth = (voxel.z - size.z) as u32;
-            return Some(slice.get(voxel.x as u32, voxel.y as u32, depth));
-        }
-    }
-
-    None
 }
 
 /// Merges duplicate materials and normalizes weights to sum to 1.0.
@@ -295,11 +188,7 @@ fn contributions_to_vertex_data(contributions: &[(u8, f32)]) -> VertexMaterialDa
     match contributions.len() {
         0 => VertexMaterialData::single(0),
         1 => VertexMaterialData::single(contributions[0].0),
-        2 => VertexMaterialData::blend2(
-            contributions[0].0,
-            contributions[1].0,
-            contributions[1].1,
-        ),
+        2 => VertexMaterialData::blend2(contributions[0].0, contributions[1].0, contributions[1].1),
         3 => VertexMaterialData::blend3(
             contributions[0].0,
             contributions[1].0,

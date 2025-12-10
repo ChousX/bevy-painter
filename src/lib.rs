@@ -12,22 +12,24 @@
 //! - **Per-material properties**: Individual texture scale and blend sharpness
 
 pub mod material;
+#[cfg(feature = "material_field")]
+pub mod material_field;
 pub mod mesh;
 pub mod palette;
-pub mod material_field;
 mod plugin;
 
 pub use plugin::TriplanarVoxelPlugin;
 
 /// Prelude module with commonly used types.
 pub mod prelude {
+    pub use crate::TriplanarVoxelPlugin;
     pub use crate::material::{TriplanarExtension, TriplanarSettings, TriplanarVoxelMaterial};
     pub use crate::mesh::{
-        MeshTriplanarExt, TriplanarMeshBuilder, VertexMaterialData, ATTRIBUTE_MATERIAL_IDS,
-        ATTRIBUTE_MATERIAL_WEIGHTS,
+        ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS, MeshTriplanarExt, TriplanarMeshBuilder,
+        VertexMaterialData,
     };
-    pub use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
-    pub use crate::TriplanarVoxelPlugin;
+    pub use crate::palette::{MAX_MATERIALS, MaterialPropertiesGpu};
 }
 /// Shader asset path (embedded).
-const TRIPLANAR_SHADER_PATH: &str = "embedded://bevy-painter/material/shaders/triplanar_extension.wgsl";
+const TRIPLANAR_SHADER_PATH: &str =
+    "embedded://bevy-painter/material/shaders/triplanar_extension.wgsl";
