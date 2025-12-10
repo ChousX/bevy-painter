@@ -1,8 +1,12 @@
 //! Minimal example showing a single cube with triplanar texturing.
 //!
 //! This is the simplest possible example to verify the plugin works.
+//! Uses a procedurally generated checkerboard texture.
 
+use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
+
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_painter::prelude::*;
 
 fn main() {
@@ -17,14 +21,13 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TriplanarVoxelMaterial>>,
-    asset_server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     // Create a simple cube mesh with uniform material
     let mesh = create_simple_cube();
     
-    // Load a texture (you'll need to provide an actual texture asset)
-    // For testing, you can use Bevy's default icon or any image
-    let albedo = asset_server.load("branding/icon.png");
+    // Create a procedural checkerboard texture array
+    let albedo = images.add(create_checkerboard_array(64, 1));
     
     // Build the material with a single material in the palette
     let extension = PaletteBuilder::new()
@@ -114,4 +117,41 @@ fn create_simple_cube() -> Mesh {
     builder.push_indices(&indices);
     
     builder.build_unwrap()
+}
+
+/// Creates a checkerboard texture array for testing.
+///
+/// Creates a single-layer texture array with a red/white checkerboard pattern.
+fn create_checkerboard_array(size: u32, layers: u32) -> Image {
+    let mut data = Vec::with_capacity((size * size * layers * 4) as usize);
+    
+    for _layer in 0..layers {
+        for y in 0..size {
+            for x in 0..size {
+                // Create 8x8 checker squares
+                let checker_size = size / 8;
+                let is_light = ((x / checker_size) + (y / checker_size)) % 2 == 0;
+                
+                let color = if is_light {
+                    [255u8, 255, 255, 255] // White
+                } else {
+                    [200u8, 50, 50, 255]   // Red
+                };
+                
+                data.extend_from_slice(&color);
+            }
+        }
+    }
+    
+    Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: layers,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::RENDER_WORLD,
+    )
 }
