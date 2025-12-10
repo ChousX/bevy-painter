@@ -359,6 +359,7 @@ dependencies = [
  "bevy",
  "bevy-sculpter",
  "bytemuck",
+ "chunky-bevy",
  "thiserror 2.0.17",
 ]
 
