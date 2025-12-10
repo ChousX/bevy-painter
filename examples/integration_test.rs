@@ -6,7 +6,7 @@
 //! - Core: "lava" (orange)
 
 use bevy::asset::RenderAssetUsages;
-use bevy::mesh::VertexAttributeValues;
+use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::pbr::ExtendedMaterial;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -27,7 +27,7 @@ fn main() {
         .insert_resource(DensityFieldMeshSize(Vec3::splat(10.0)))
         .init_resource::<MaterialBlendSettings>()
         .add_systems(Startup, setup)
-        .add_systems(PostUpdate, inject_material_attributes)
+        .add_systems(PostUpdate, apply_triplanar_materials)
         .add_systems(Update, rotate_camera)
         .run();
 }
@@ -87,9 +87,13 @@ fn create_texture_array(images: &mut Assets<Image>) -> Handle<Image> {
     images.add(image)
 }
 
-/// Marker component for chunks that need material attribute injection
+/// Component to mark chunks that need triplanar material applied
 #[derive(Component)]
-struct NeedsMaterialAttributes;
+struct PendingTriplanarMaterial;
+
+/// Resource holding the shared triplanar material
+#[derive(Resource)]
+struct SharedTriplanarMaterial(Handle<TriplanarVoxelMaterial>);
 
 fn setup(
     mut commands: Commands,
@@ -99,7 +103,7 @@ fn setup(
     // Create procedural texture array
     let albedo_handle = create_texture_array(&mut images);
 
-    // Create triplanar material
+    // Create triplanar material and store as resource
     let triplanar_material = triplanar_materials.add(ExtendedMaterial {
         base: StandardMaterial {
             perceptual_roughness: 0.8,
@@ -110,6 +114,8 @@ fn setup(
             .with_blend_sharpness(4.0)
             .with_materials(3),
     });
+
+    commands.insert_resource(SharedTriplanarMaterial(triplanar_material));
 
     // Create density field with a sphere
     let mut density_field = DensityField::new();
@@ -122,14 +128,14 @@ fn setup(
     paint_materials(&mut material_field, center, radius);
 
     // Spawn chunk - SurfaceNetsPlugin will generate the mesh
+    // Don't add any material here - we'll apply it after mesh generation
     commands.spawn((
         Chunk,
         ChunkPos(IVec3::ZERO),
         density_field,
         material_field,
         DensityFieldDirty,
-        NeedsMaterialAttributes,
-        MeshMaterial3d(triplanar_material),
+        PendingTriplanarMaterial,
         Transform::from_translation(Vec3::splat(-5.0)),
     ));
 
@@ -160,8 +166,14 @@ fn setup(
     info!("Materials: 0=grass (green top), 1=stone (gray bottom), 2=lava (orange core)");
 }
 
-/// System that injects material attributes into meshes after SurfaceNets generates them
-fn inject_material_attributes(
+/// System that applies triplanar materials after SurfaceNets generates meshes.
+///
+/// This system:
+/// 1. Waits for SurfaceNetsPlugin to generate the mesh
+/// 2. Injects material attributes into the mesh
+/// 3. Replaces the mesh with one that has material attributes
+/// 4. Applies the triplanar material
+fn apply_triplanar_materials(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     query: Query<
@@ -173,31 +185,42 @@ fn inject_material_attributes(
             Option<&NeighborDensityFields>,
             Option<&NeighborMaterialFields>,
         ),
-        With<NeedsMaterialAttributes>,
+        With<PendingTriplanarMaterial>,
     >,
     mesh_size: Res<DensityFieldMeshSize>,
     blend_settings: Res<MaterialBlendSettings>,
+    triplanar_material: Res<SharedTriplanarMaterial>,
 ) {
     for (entity, mesh_handle, density, materials, neighbor_density, neighbor_materials) in
         query.iter()
     {
-        let Some(mesh) = meshes.get_mut(&mesh_handle.0) else {
+        let Some(mesh) = meshes.get(&mesh_handle.0) else {
             continue;
         };
 
-        // Skip if already has material attributes
-        if mesh.attribute(ATTRIBUTE_MATERIAL_IDS).is_some() {
-            commands.entity(entity).remove::<NeedsMaterialAttributes>();
-            continue;
-        }
-
-        // Get vertex positions
+        // Get vertex positions and normals
         let Some(VertexAttributeValues::Float32x3(positions)) =
-            mesh.attribute(Mesh::ATTRIBUTE_POSITION).cloned()
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
         else {
             warn!("Mesh has no positions");
             continue;
         };
+
+        let Some(VertexAttributeValues::Float32x3(normals)) =
+            mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
+        else {
+            warn!("Mesh has no normals");
+            continue;
+        };
+
+        let indices = mesh.indices().map(|i| match i {
+            Indices::U16(v) => v.iter().map(|&i| i as u32).collect::<Vec<_>>(),
+            Indices::U32(v) => v.clone(),
+        });
+
+        // Clone the data we need
+        let positions = positions.clone();
+        let normals = normals.clone();
 
         // Compute material data for each vertex
         let mut material_ids: Vec<u32> = Vec::with_capacity(positions.len());
@@ -220,17 +243,38 @@ fn inject_material_attributes(
             material_weights.push(vertex_data.pack_weights());
         }
 
-        // Insert material attributes
-        mesh.insert_attribute(ATTRIBUTE_MATERIAL_IDS, material_ids);
-        mesh.insert_attribute(ATTRIBUTE_MATERIAL_WEIGHTS, material_weights);
-
-        // Remove marker
-        commands.entity(entity).remove::<NeedsMaterialAttributes>();
-
-        info!(
-            "Injected material attributes into mesh with {} vertices",
-            positions.len()
+        // Create a new mesh with all required attributes
+        let mut new_mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::RENDER_WORLD | RenderAssetUsages::MAIN_WORLD,
         );
+
+        new_mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        new_mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        let material_ids_len = material_ids.len();
+        new_mesh.insert_attribute(ATTRIBUTE_MATERIAL_IDS, material_ids);
+        new_mesh.insert_attribute(ATTRIBUTE_MATERIAL_WEIGHTS, material_weights);
+
+        if let Some(indices) = indices {
+            new_mesh.insert_indices(Indices::U32(indices));
+        }
+
+        // Add the new mesh and apply triplanar material
+        let new_mesh_handle = meshes.add(new_mesh);
+
+        commands
+            .entity(entity)
+            .remove::<PendingTriplanarMaterial>()
+            .remove::<MeshMaterial3d<StandardMaterial>>()
+            .insert((
+                Mesh3d(new_mesh_handle),
+                MeshMaterial3d(triplanar_material.0.clone()),
+            ));
+        info!(
+            "Applied triplanar material to mesh with {} vertices",
+            material_ids_len
+        );
+        
     }
 }
 
