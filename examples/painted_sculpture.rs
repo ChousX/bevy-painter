@@ -14,6 +14,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_painter::prelude::*;
+use bevy_painter::palette::{TexturePalette, PaletteBuilder};
 use bevy_sculpter::prelude::*;
 use chunky_bevy::prelude::*;
 
@@ -22,6 +23,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(ChunkyPlugin::default())
         .add_plugins(TriplanarVoxelPlugin)
+        .init_asset::<TexturePalette>() // Required: register TexturePalette asset type
         .insert_resource(DensityFieldMeshSize(vec3(10., 10., 10.)))
         .init_resource::<Brush>()
         .add_systems(Startup, setup)
@@ -48,18 +50,26 @@ struct TerrainMat(Handle<TriplanarVoxelMaterial>);
 fn setup(
     mut commands: Commands,
     mut materials: ResMut<Assets<TriplanarVoxelMaterial>>,
+    mut palettes: ResMut<Assets<TexturePalette>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     commands.insert_resource(Brush::new());
 
-    // Create texture array
+    // Create texture array and palette
     let albedo = create_textures(&mut images);
+    let palette = palettes.add(
+        PaletteBuilder::new()
+            .with_albedo(albedo)
+            .add_material_named("grass")
+            .add_material_named("rock")
+            .add_material_named("dirt")
+            .add_material_named("snow")
+            .build()
+    );
+    
     let mat = materials.add(TriplanarVoxelMaterial {
         base: StandardMaterial::default(),
-        extension: TriplanarExtension::new(albedo)
-            .with_materials(4)
-            .with_texture_scale(0.5)
-            .with_blend_sharpness(4.0),
+        extension: TriplanarExtension::new(palette),
     });
     commands.insert_resource(TerrainMat(mat.clone()));
 
@@ -87,10 +97,11 @@ fn setup(
                 });
 
                 // Apply steepness-based rock using density sampler closure
+                let flat_mat = mat_field.get(16, 16, 16);
                 fill_by_steepness(
                     &mut mat_field,
                     |x, y, z| density.get(x, y, z),
-                    mat_field.get(16, 16, 16),
+                    flat_mat,
                     1,
                     0.6,
                 );
@@ -307,7 +318,7 @@ fn sphere_aabb(center: Vec3, radius: f32, min: Vec3, max: Vec3) -> bool {
 
 fn input(
     keys: Res<ButtonInput<KeyCode>>,
-    mut scroll: EventReader<MouseWheel>,
+    mut scroll: MessageReader<MouseWheel>,
     mut brush: ResMut<Brush>,
 ) {
     for ev in scroll.read() {
