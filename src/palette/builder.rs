@@ -1,20 +1,20 @@
-//! Builder for constructing texture palettes.
+//! Builder for constructing triplanar extensions.
 
 use bevy::prelude::*;
 
-use super::asset::TexturePalette;
-use super::properties::PaletteMaterial;
+use super::properties::{PaletteMaterial, MaterialPropertiesGpu};
+use crate::material::TriplanarExtension;
 
-/// Builder for creating [`TexturePalette`] instances.
+/// Builder for creating [`TriplanarExtension`] instances.
 ///
-/// Provides a fluent API for constructing palettes with validation.
+/// Provides a fluent API for constructing material extensions with validation.
 ///
 /// # Example
 ///
 /// ```ignore
 /// use bevy_painter::palette::{PaletteBuilder, PaletteMaterial};
 ///
-/// let palette = PaletteBuilder::new()
+/// let extension = PaletteBuilder::new()
 ///     .with_albedo(asset_server.load("terrain/albedo.ktx2"))
 ///     .with_normal(asset_server.load("terrain/normal.ktx2"))
 ///     .with_arm(asset_server.load("terrain/arm.ktx2"))
@@ -29,13 +29,22 @@ pub struct PaletteBuilder {
     normal: Option<Handle<Image>>,
     arm: Option<Handle<Image>>,
     materials: Vec<PaletteMaterial>,
-    generate_mipmaps: bool,
+    texture_scale: f32,
+    blend_sharpness: f32,
+    use_biplanar_color: bool,
+    enable_normal_maps: bool,
 }
 
 impl PaletteBuilder {
     /// Create a new palette builder.
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            texture_scale: 1.0,
+            blend_sharpness: 4.0,
+            use_biplanar_color: true,
+            enable_normal_maps: true,
+            ..Default::default()
+        }
     }
 
     /// Set the albedo (base color) texture array.
@@ -81,64 +90,76 @@ impl PaletteBuilder {
         self.add_material(PaletteMaterial::new(name))
     }
 
-    /// Set whether to generate mipmaps for textures without them.
-    ///
-    /// Default: `false` (assumes pre-mipmapped KTX2 textures).
-    pub fn with_generate_mipmaps(mut self, generate: bool) -> Self {
-        self.generate_mipmaps = generate;
+    /// Set the global texture scale multiplier.
+    pub fn with_texture_scale(mut self, scale: f32) -> Self {
+        self.texture_scale = scale;
         self
     }
 
-    /// Build the texture palette.
+    /// Set the global blend sharpness multiplier.
+    pub fn with_blend_sharpness(mut self, sharpness: f32) -> Self {
+        self.blend_sharpness = sharpness;
+        self
+    }
+
+    /// Enable or disable biplanar color mapping.
+    pub fn with_biplanar_color(mut self, enable: bool) -> Self {
+        self.use_biplanar_color = enable;
+        self
+    }
+
+    /// Enable or disable normal mapping.
+    pub fn with_normal_maps(mut self, enable: bool) -> Self {
+        self.enable_normal_maps = enable;
+        self
+    }
+
+    /// Build the triplanar extension.
     ///
     /// # Panics
     ///
     /// Panics if no albedo texture was provided.
-    pub fn build(self) -> TexturePalette {
-        TexturePalette {
+    pub fn build(self) -> TriplanarExtension {
+        let material_properties: Vec<MaterialPropertiesGpu> = self
+            .materials
+            .iter()
+            .map(|m| MaterialPropertiesGpu::from(m))
+            .collect();
+
+        TriplanarExtension {
             albedo: self.albedo.expect("Albedo texture is required"),
             normal: self.normal,
             arm: self.arm,
-            materials: self.materials,
-            generate_mipmaps: self.generate_mipmaps,
+            material_properties,
+            texture_scale: self.texture_scale,
+            blend_sharpness: self.blend_sharpness,
+            use_biplanar_color: self.use_biplanar_color,
+            enable_normal_maps: self.enable_normal_maps,
         }
     }
 
-    /// Try to build the texture palette.
+    /// Try to build the triplanar extension.
     ///
     /// Returns `None` if no albedo texture was provided.
-    pub fn try_build(self) -> Option<TexturePalette> {
-        Some(TexturePalette {
+    pub fn try_build(self) -> Option<TriplanarExtension> {
+        let material_properties: Vec<MaterialPropertiesGpu> = self
+            .materials
+            .iter()
+            .map(|m| MaterialPropertiesGpu::from(m))
+            .collect();
+
+        Some(TriplanarExtension {
             albedo: self.albedo?,
             normal: self.normal,
             arm: self.arm,
-            materials: self.materials,
-            generate_mipmaps: self.generate_mipmaps,
+            material_properties,
+            texture_scale: self.texture_scale,
+            blend_sharpness: self.blend_sharpness,
+            use_biplanar_color: self.use_biplanar_color,
+            enable_normal_maps: self.enable_normal_maps,
         })
     }
 }
-
-/// Extension trait for quickly creating simple palettes.
-pub trait QuickPalette {
-    /// Create a palette with just an albedo texture and auto-generated material names.
-    ///
-    /// Material names will be "material_0", "material_1", etc.
-    fn quick_palette(albedo: Handle<Image>, material_count: usize) -> TexturePalette {
-        let materials = (0..material_count)
-            .map(|i| PaletteMaterial::new(format!("material_{}", i)))
-            .collect();
-
-        TexturePalette {
-            albedo,
-            normal: None,
-            arm: None,
-            materials,
-            generate_mipmaps: false,
-        }
-    }
-}
-
-impl QuickPalette for TexturePalette {}
 
 #[cfg(test)]
 mod tests {
@@ -146,31 +167,31 @@ mod tests {
 
     #[test]
     fn test_builder_basic() {
-        let palette = PaletteBuilder::new()
+        let ext = PaletteBuilder::new()
             .with_albedo(Handle::default())
             .add_material_named("grass")
             .add_material_named("stone")
             .build();
 
-        assert_eq!(palette.material_count(), 2);
-        assert_eq!(palette.materials[0].name, "grass");
-        assert_eq!(palette.materials[1].name, "stone");
+        assert_eq!(ext.material_properties.len(), 2);
     }
 
     #[test]
     fn test_builder_full() {
-        let palette = PaletteBuilder::new()
+        let ext = PaletteBuilder::new()
             .with_albedo(Handle::default())
             .with_normal(Handle::default())
             .with_arm(Handle::default())
             .add_material(PaletteMaterial::new("grass").with_texture_scale(2.0))
-            .with_generate_mipmaps(true)
+            .with_texture_scale(1.5)
+            .with_blend_sharpness(8.0)
             .build();
 
-        assert!(palette.has_normal_maps());
-        assert!(palette.has_arm());
-        assert!(palette.generate_mipmaps);
-        assert_eq!(palette.materials[0].texture_scale, 2.0);
+        assert!(ext.normal.is_some());
+        assert!(ext.arm.is_some());
+        assert_eq!(ext.texture_scale, 1.5);
+        assert_eq!(ext.blend_sharpness, 8.0);
+        assert_eq!(ext.material_properties[0].texture_scale, 2.0);
     }
 
     #[test]
@@ -182,16 +203,6 @@ mod tests {
     #[test]
     fn test_try_build_missing_albedo() {
         let result = PaletteBuilder::new().add_material_named("test").try_build();
-
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_quick_palette() {
-        let palette = TexturePalette::quick_palette(Handle::default(), 3);
-
-        assert_eq!(palette.material_count(), 3);
-        assert_eq!(palette.materials[0].name, "material_0");
-        assert_eq!(palette.materials[2].name, "material_2");
     }
 }

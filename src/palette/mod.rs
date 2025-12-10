@@ -1,15 +1,10 @@
-//! Texture palette for triplanar voxel materials.
+//! Texture palette utilities for triplanar voxel materials.
 //!
-//! A [`TexturePalette`] defines a collection of materials that can be
-//! blended together on voxel meshes. Each material corresponds to a layer
-//! in the texture arrays.
+//! Provides a builder API for constructing material extensions with
+//! texture arrays and per-material properties.
 
-mod asset;
 mod builder;
 mod properties;
-mod validation;
 
-pub use asset::TexturePalette;
 pub use builder::PaletteBuilder;
 pub use properties::{MAX_MATERIALS, MaterialPropertiesGpu, PaletteMaterial};
-pub use validation::PaletteValidationError;

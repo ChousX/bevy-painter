@@ -1,4 +1,4 @@
-//! # bevy_triplanar_voxel
+//! # bevy_painter
 //!
 //! A Bevy plugin for rendering voxel terrain with triplanar texture mapping
 //! and multi-material blending.
@@ -15,7 +15,7 @@
 //!
 //! ```ignore
 //! use bevy::prelude::*;
-//! use bevy_triplanar_voxel::prelude::*;
+//! use bevy_painter::prelude::*;
 //!
 //! fn main() {
 //!     App::new()
@@ -29,29 +29,19 @@
 //!     mut commands: Commands,
 //!     mut meshes: ResMut<Assets<Mesh>>,
 //!     mut materials: ResMut<Assets<TriplanarVoxelMaterial>>,
-//!     mut palettes: ResMut<Assets<TexturePalette>>,
 //!     asset_server: Res<AssetServer>,
 //! ) {
-//!     // Create a texture palette
-//!     let palette = PaletteBuilder::new()
+//!     // Create a material extension with texture palette
+//!     let extension = PaletteBuilder::new()
 //!         .with_albedo(asset_server.load("terrain/albedo.ktx2"))
 //!         .add_material_named("grass")
 //!         .add_material_named("stone")
 //!         .build();
-//!     let palette_handle = palettes.add(palette);
-//!
-//!     // Create a mesh with material data
-//!     let mesh = TriplanarMeshBuilder::new()
-//!         .with_vertex_single([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
-//!         .with_vertex_single([1.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
-//!         .with_vertex_single([0.5, 0.0, 1.0], [0.0, 1.0, 0.0], 1)
-//!         .with_indices(vec![0, 1, 2])
-//!         .build_unwrap();
 //!
 //!     // Create the material
 //!     let material = TriplanarVoxelMaterial {
 //!         base: StandardMaterial::default(),
-//!         extension: TriplanarExtension::new(palette_handle),
+//!         extension,
 //!     };
 //!
 //!     // Spawn the mesh
@@ -67,24 +57,17 @@ pub mod mesh;
 pub mod palette;
 mod plugin;
 
-
 /// Per-voxel material storage for terrain texturing.
-///
-/// Integrates with `bevy-sculpter` meshes. Enable with:
-/// ```toml
-/// bevy-painter = { version = "...", features = ["material_field"] }
-/// ```
 #[cfg(feature = "material_field")]
 pub mod material_field;
 
-// In your existing prelude, add:
 pub mod prelude {
     pub use crate::material::{TriplanarExtension, TriplanarSettings, TriplanarVoxelMaterial};
     pub use crate::mesh::{
         MeshTriplanarExt, TriplanarMeshBuilder, VertexMaterialData, ATTRIBUTE_MATERIAL_IDS,
         ATTRIBUTE_MATERIAL_WEIGHTS,
     };
-    pub use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
+    pub use crate::palette::{MaterialPropertiesGpu, PaletteMaterial, PaletteBuilder, MAX_MATERIALS};
     pub use crate::plugin::TriplanarVoxelPlugin;
 
     #[cfg(feature = "material_field")]
@@ -93,4 +76,3 @@ pub mod prelude {
         fill_height_layers, paint_sphere, paint_surface, BlendConfig, MaterialField,
     };
 }
-

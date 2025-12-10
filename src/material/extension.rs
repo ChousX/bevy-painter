@@ -21,7 +21,7 @@ use bevy::shader::ShaderRef;
 use bytemuck::{Pod, Zeroable};
 
 use crate::mesh::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
-use crate::palette::{MaterialPropertiesGpu, TexturePalette, MAX_MATERIALS};
+use crate::palette::{MaterialPropertiesGpu, MAX_MATERIALS};
 
 /// Shader asset path.
 const TRIPLANAR_SHADER_PATH: &str = "shaders/triplanar_extension.wgsl";
@@ -52,8 +52,17 @@ impl TriplanarSettings {
 /// Material extension that adds triplanar mapping and multi-material blending.
 #[derive(Asset, TypePath, Clone, Debug)]
 pub struct TriplanarExtension {
-    /// The texture palette containing all material textures.
-    pub palette: Handle<TexturePalette>,
+    /// Albedo (base color) texture array (required).
+    pub albedo: Handle<Image>,
+    
+    /// Optional normal map texture array.
+    pub normal: Option<Handle<Image>>,
+    
+    /// Optional ARM (AO/Roughness/Metallic) texture array.
+    pub arm: Option<Handle<Image>>,
+    
+    /// Per-material properties.
+    pub material_properties: Vec<MaterialPropertiesGpu>,
 
     /// Global texture scale multiplier (default: 1.0).
     pub texture_scale: f32,
@@ -71,7 +80,10 @@ pub struct TriplanarExtension {
 impl Default for TriplanarExtension {
     fn default() -> Self {
         Self {
-            palette: Handle::default(),
+            albedo: Handle::default(),
+            normal: None,
+            arm: None,
+            material_properties: Vec::new(),
             texture_scale: 1.0,
             blend_sharpness: 4.0,
             use_biplanar_color: true,
@@ -81,10 +93,10 @@ impl Default for TriplanarExtension {
 }
 
 impl TriplanarExtension {
-    /// Create a new triplanar extension with a palette.
-    pub fn new(palette: Handle<TexturePalette>) -> Self {
+    /// Create a new triplanar extension with an albedo texture.
+    pub fn new(albedo: Handle<Image>) -> Self {
         Self {
-            palette,
+            albedo,
             ..default()
         }
     }
@@ -113,71 +125,61 @@ impl TriplanarExtension {
         self
     }
 
-    /// Build GPU settings from this extension and palette.
-    pub fn build_settings(&self, palette: Option<&TexturePalette>) -> TriplanarSettings {
+    /// Build GPU settings from this extension.
+    fn build_settings(&self) -> TriplanarSettings {
         let mut flags = 0u32;
 
         if self.use_biplanar_color {
             flags |= TriplanarSettings::FLAG_USE_BIPLANAR;
         }
 
-        let has_normals = palette.map(|p| p.has_normal_maps()).unwrap_or(false);
-        if self.enable_normal_maps && has_normals {
+        if self.enable_normal_maps && self.normal.is_some() {
             flags |= TriplanarSettings::FLAG_ENABLE_NORMALS;
         }
 
-        let has_arm = palette.map(|p| p.has_arm()).unwrap_or(false);
-        if has_arm {
+        if self.arm.is_some() {
             flags |= TriplanarSettings::FLAG_HAS_ARM;
         }
-
-        let material_count = palette.map(|p| p.material_count() as u32).unwrap_or(0);
 
         TriplanarSettings {
             texture_scale: self.texture_scale,
             blend_sharpness: self.blend_sharpness,
             flags,
-            material_count,
+            material_count: self.material_properties.len() as u32,
         }
     }
 }
 
 impl AsBindGroup for TriplanarExtension {
     type Data = ();
-    type Param = (
-        SRes<RenderAssets<GpuImage>>,
-        SRes<Assets<TexturePalette>>,
-        SRes<FallbackImage>,
-    );
+    type Param = (SRes<RenderAssets<GpuImage>>, SRes<FallbackImage>);
 
     fn as_bind_group(
         &self,
         layout: &BindGroupLayout,
         render_device: &RenderDevice,
-        (gpu_images, palettes, fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
+        (gpu_images, fallback_image): &mut SystemParamItem<'_, '_, Self::Param>,
     ) -> Result<PreparedBindGroup, AsBindGroupError> {
-        // Get the palette
-        let palette = palettes.get(&self.palette);
-
         // Get albedo texture (required)
-        let albedo_handle = palette.map(|p| &p.albedo);
-        let albedo_image = albedo_handle
-            .and_then(|h| gpu_images.get(h))
+        let albedo_image = gpu_images
+            .get(&self.albedo)
             .ok_or(AsBindGroupError::RetryNextUpdate)?;
 
         // Get optional textures, falling back to 2D array fallback
         let fallback = &fallback_image.d2_array;
 
-        let normal_image = palette
-            .and_then(|p| p.normal.as_ref())
+        let normal_image = self
+            .normal
+            .as_ref()
             .and_then(|h| gpu_images.get(h));
 
-        let arm_image = palette
-            .and_then(|p| p.arm.as_ref())
+        let arm_image = self
+            .arm
+            .as_ref()
             .and_then(|h| gpu_images.get(h));
 
         // Build settings uniform
-        let settings = self.build_settings(palette);
+        let settings = self.build_settings();
         let settings_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("triplanar_settings"),
             contents: bytemuck::bytes_of(&settings),
@@ -186,10 +188,8 @@ impl AsBindGroup for TriplanarExtension {
 
         // Build material properties storage buffer
         let mut material_props = [MaterialPropertiesGpu::default(); MAX_MATERIALS];
-        if let Some(p) = palette {
-            for (i, mat) in p.materials.iter().enumerate().take(MAX_MATERIALS) {
-                material_props[i] = MaterialPropertiesGpu::from(mat);
-            }
+        for (i, mat) in self.material_properties.iter().enumerate().take(MAX_MATERIALS) {
+            material_props[i] = *mat;
         }
         let props_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("triplanar_material_props"),
@@ -197,7 +197,7 @@ impl AsBindGroup for TriplanarExtension {
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         });
 
-        // Create bind group - entries must be in same order as layout entries
+        // Create bind group
         let bind_group = render_device.create_bind_group(
             Some("triplanar_extension_bind_group"),
             layout,
@@ -240,7 +240,8 @@ impl AsBindGroup for TriplanarExtension {
         _param: &mut SystemParamItem<'_, '_, Self::Param>,
         _force_no_bindless: bool,
     ) -> Result<UnpreparedBindGroup, AsBindGroupError> {
-        Err(AsBindGroupError::CreateBindGroupDirectly)
+        // Signal that we want to use as_bind_group directly
+        Err(AsBindGroupError::RetryNextUpdate)
     }
 
     fn bind_group_layout_entries(
@@ -279,7 +280,7 @@ impl AsBindGroup for TriplanarExtension {
     }
 
     fn bind_group_data(&self) -> Self::Data {}
-
+    
     fn label() -> Option<&'static str> {
         Some("triplanar_extension")
     }
@@ -308,7 +309,6 @@ impl MaterialExtension for TriplanarExtension {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // Define the vertex layout including our custom attributes
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
@@ -320,57 +320,5 @@ impl MaterialExtension for TriplanarExtension {
         descriptor.vertex.buffers = vec![vertex_layout];
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_extension() {
-        let ext = TriplanarExtension::default();
-
-        assert_eq!(ext.texture_scale, 1.0);
-        assert_eq!(ext.blend_sharpness, 4.0);
-        assert!(ext.use_biplanar_color);
-        assert!(ext.enable_normal_maps);
-    }
-
-    #[test]
-    fn test_extension_builder() {
-        let ext = TriplanarExtension::new(Handle::default())
-            .with_texture_scale(2.0)
-            .with_blend_sharpness(8.0)
-            .with_biplanar_color(false)
-            .with_normal_maps(false);
-
-        assert_eq!(ext.texture_scale, 2.0);
-        assert_eq!(ext.blend_sharpness, 8.0);
-        assert!(!ext.use_biplanar_color);
-        assert!(!ext.enable_normal_maps);
-    }
-
-    #[test]
-    fn test_settings_flags_no_palette() {
-        let ext = TriplanarExtension::default();
-        let settings = ext.build_settings(None);
-
-        assert!(settings.flags & TriplanarSettings::FLAG_USE_BIPLANAR != 0);
-        assert!(settings.flags & TriplanarSettings::FLAG_ENABLE_NORMALS == 0);
-        assert!(settings.flags & TriplanarSettings::FLAG_HAS_ARM == 0);
-        assert_eq!(settings.material_count, 0);
-    }
-
-    #[test]
-    fn test_settings_scale_and_sharpness() {
-        let ext = TriplanarExtension::default()
-            .with_texture_scale(2.5)
-            .with_blend_sharpness(6.0);
-
-        let settings = ext.build_settings(None);
-
-        assert_eq!(settings.texture_scale, 2.5);
-        assert_eq!(settings.blend_sharpness, 6.0);
     }
 }

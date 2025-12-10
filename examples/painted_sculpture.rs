@@ -14,7 +14,6 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_painter::prelude::*;
-use bevy_painter::palette::{TexturePalette, PaletteBuilder};
 use bevy_sculpter::prelude::*;
 use chunky_bevy::prelude::*;
 
@@ -23,7 +22,6 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(ChunkyPlugin::default())
         .add_plugins(TriplanarVoxelPlugin)
-        .init_asset::<TexturePalette>() // Required: register TexturePalette asset type
         .insert_resource(DensityFieldMeshSize(vec3(10., 10., 10.)))
         .init_resource::<Brush>()
         .add_systems(Startup, setup)
@@ -50,28 +48,25 @@ struct TerrainMat(Handle<TriplanarVoxelMaterial>);
 fn setup(
     mut commands: Commands,
     mut materials: ResMut<Assets<TriplanarVoxelMaterial>>,
-    mut palettes: ResMut<Assets<TexturePalette>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     commands.insert_resource(Brush::new());
 
-    // Create texture array and palette
+    // Create texture and build extension directly
     let albedo = create_textures(&mut images);
-    let palette = palettes.add(
-        PaletteBuilder::new()
-            .with_albedo(albedo)
-            .add_material_named("grass")
-            .add_material_named("rock")
-            .add_material_named("dirt")
-            .add_material_named("snow")
-            .build()
-    );
+    let extension = PaletteBuilder::new()
+        .with_albedo(albedo)
+        .add_material_named("grass")
+        .add_material_named("rock")
+        .add_material_named("dirt")
+        .add_material_named("snow")
+        .build();
     
     let mat = materials.add(TriplanarVoxelMaterial {
         base: StandardMaterial::default(),
-        extension: TriplanarExtension::new(palette),
+        extension,
     });
-    commands.insert_resource(TerrainMat(mat.clone()));
+    commands.insert_resource(TerrainMat(mat.clone()));   
 
     let mesh_size = vec3(10., 10., 10.);
 
@@ -374,11 +369,30 @@ fn create_textures(images: &mut Assets<Image>) -> Handle<Image> {
         }
     }
 
-    images.add(Image::new(
-        Extent3d { width: size as u32, height: size as u32, depth_or_array_layers: 4 },
+    let mut image = Image::new_fill(
+        Extent3d { 
+            width: size as u32, 
+            height: size as u32, 
+            depth_or_array_layers: 4 
+        },
         TextureDimension::D2,
-        data,
+        &data,
         TextureFormat::Rgba8UnormSrgb,
         default(),
-    ))
+    );
+    
+    // Ensure it's treated as a texture array with proper view descriptor
+    image.texture_view_descriptor = Some(bevy::render::render_resource::TextureViewDescriptor {
+        label: None,
+        format: Some(TextureFormat::Rgba8UnormSrgb),
+        dimension: Some(bevy::render::render_resource::TextureViewDimension::D2Array),
+        aspect: bevy::render::render_resource::TextureAspect::All,
+        base_mip_level: 0,
+        mip_level_count: None,
+        base_array_layer: 0,
+        array_layer_count: Some(4),
+        usage: None,  // Add the required usage field
+    });
+
+    images.add(image)
 }
