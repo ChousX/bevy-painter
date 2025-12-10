@@ -4,9 +4,9 @@
 //! - Top hemisphere: "grass" (green)
 //! - Bottom hemisphere: "stone" (gray)
 //! - Core: "lava" (orange)
+use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 
 use bevy::asset::RenderAssetUsages;
-use bevy::mesh::{Indices, PrimitiveTopology, VertexAttributeValues};
 use bevy::pbr::ExtendedMaterial;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -46,10 +46,10 @@ fn generate_checker_texture(color1: [u8; 4], color2: [u8; 4], checker_size: usiz
     data
 }
 
-/// Creates a 2D texture array with procedural materials
+/// Creates a 2D texture array with procedural materials (4 colors)
 fn create_texture_array(images: &mut Assets<Image>) -> Handle<Image> {
     let layer_size = 64;
-    let layer_count = 3;
+    let layer_count = 4;
 
     let grass = generate_checker_texture(
         [34, 139, 34, 255], // Forest green
@@ -66,11 +66,17 @@ fn create_texture_array(images: &mut Assets<Image>) -> Handle<Image> {
         [255, 50, 0, 255],  // Red-orange
         8,
     );
+    let water = generate_checker_texture(
+        [30, 144, 255, 255], // Dodger blue
+        [0, 100, 200, 255],  // Darker blue
+        8,
+    );
 
     let mut combined_data = Vec::with_capacity(layer_size * layer_size * 4 * layer_count);
     combined_data.extend_from_slice(&grass);
     combined_data.extend_from_slice(&stone);
     combined_data.extend_from_slice(&lava);
+    combined_data.extend_from_slice(&water);
 
     let image = Image::new(
         Extent3d {
@@ -112,7 +118,7 @@ fn setup(
         extension: TriplanarExtension::new(albedo_handle)
             .with_texture_scale(0.5)
             .with_blend_sharpness(4.0)
-            .with_materials(3),
+            .with_materials(4),
     });
 
     commands.insert_resource(SharedTriplanarMaterial(triplanar_material));
@@ -163,7 +169,8 @@ fn setup(
     });
 
     info!("Test scene loaded!");
-    info!("Materials: 0=grass (green top), 1=stone (gray bottom), 2=lava (orange core)");
+    info!("Materials: 0=grass (green), 1=stone (gray), 2=lava (orange), 3=water (blue)");
+    info!("Sphere divided into 4 quadrants based on X/Z position");
 }
 
 /// System that applies triplanar materials after SurfaceNets generates meshes.
@@ -270,31 +277,28 @@ fn apply_triplanar_materials(
                 Mesh3d(new_mesh_handle),
                 MeshMaterial3d(triplanar_material.0.clone()),
             ));
+
         info!(
             "Applied triplanar material to mesh with {} vertices",
             material_ids_len
         );
-        
     }
 }
 
-/// Paints materials based on position relative to sphere center
-fn paint_materials(field: &mut MaterialField, center: Vec3, radius: f32) {
-    let inner_radius = radius * 0.5;
-
+/// Paints materials in 4 quadrants based on X and Z position
+fn paint_materials(field: &mut MaterialField, center: Vec3, _radius: f32) {
     for z in 0..32 {
         for y in 0..32 {
             for x in 0..32 {
                 let pos = Vec3::new(x as f32, y as f32, z as f32);
                 let to_center = pos - center;
-                let dist = to_center.length();
 
-                let material = if dist < inner_radius {
-                    2 // Inner core: lava
-                } else if to_center.y > 0.0 {
-                    0 // Upper hemisphere: grass
-                } else {
-                    1 // Lower hemisphere: stone
+                // Divide into 4 quadrants based on X and Z signs
+                let material = match (to_center.x >= 0.0, to_center.z >= 0.0) {
+                    (true, true) => 0,   // +X +Z: grass (green)
+                    (false, true) => 1,  // -X +Z: stone (gray)
+                    (false, false) => 2, // -X -Z: lava (orange)
+                    (true, false) => 3,  // +X -Z: water (blue)
                 };
 
                 field.set(x, y, z, material);
