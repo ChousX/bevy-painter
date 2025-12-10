@@ -14,6 +14,7 @@
 pub mod material;
 pub mod mesh;
 pub mod palette;
+pub mod material_field;
 mod plugin;
 
 pub use plugin::TriplanarVoxelPlugin;
