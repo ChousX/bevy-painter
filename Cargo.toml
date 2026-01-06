@@ -7,7 +7,7 @@ keywords = ["bevy", "voxel", "triplanar", "terrain", "material"]
 categories = ["game-development", "rendering::graphics-api"]
 
 [features]
-default = []
+default = ["material_field"]
 debug_viz = []
 material_field = ["bevy-sculpter", "chunky-bevy"]
 
