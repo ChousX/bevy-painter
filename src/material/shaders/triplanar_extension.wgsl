@@ -3,9 +3,23 @@
 // No UVs required - texture coordinates derived from world position
 
 #import bevy_pbr::{
+    pbr_fragment::pbr_input_from_standard_material,
+    pbr_functions::alpha_discard,
     mesh_functions,
     view_transformations::position_world_to_clip,
 }
+
+#ifdef PREPASS_PIPELINE
+#import bevy_pbr::{
+    prepass_io::{FragmentOutput},
+    pbr_deferred_functions::deferred_output,
+}
+#else
+#import bevy_pbr::{
+    forward_io::{FragmentOutput},
+    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+}
+#endif
 
 // GPU settings - must match TriplanarSettings in extension.rs
 struct TriplanarSettings {
@@ -24,6 +38,7 @@ struct MaterialProperties {
 }
 
 // Bindings - must match extension.rs bind_group_layout_entries
+// Use #{MATERIAL_BIND_GROUP} placeholder - Bevy replaces this at runtime
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> settings: TriplanarSettings;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var albedo_array: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var albedo_sampler: sampler;
@@ -38,8 +53,7 @@ const FLAG_USE_BIPLANAR: u32 = 1u;
 const FLAG_ENABLE_NORMALS: u32 = 2u;
 const FLAG_HAS_ARM: u32 = 4u;
 
-// Vertex input - locations must match specialize() in extension.rs
-// No UVs - triplanar derives texture coords from world position
+// Custom vertex input with material attributes
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
@@ -48,13 +62,14 @@ struct Vertex {
     @location(3) material_weights: u32,
 }
 
-// Vertex output / Fragment input
+// Custom vertex output matching what fragment shader expects
 struct VertexOutput {
-    @builtin(position) clip_position: vec4<f32>,
-    @location(0) world_position: vec3<f32>,
+    @builtin(position) position: vec4<f32>,
+    @location(0) world_position: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) @interpolate(flat) material_ids: u32,
     @location(3) @interpolate(flat) material_weights: u32,
+    @location(4) instance_index: u32,
 }
 
 @vertex
@@ -67,16 +82,15 @@ fn vertex(vertex: Vertex) -> VertexOutput {
         vec4<f32>(vertex.position, 1.0)
     );
 
-    out.clip_position = position_world_to_clip(world_position.xyz);
-    out.world_position = world_position.xyz;
+    out.position = position_world_to_clip(world_position.xyz);
+    out.world_position = world_position;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(
         vertex.normal,
         vertex.instance_index
     );
-
-    // Pass material data through (flat interpolation - no blending across triangle)
     out.material_ids = vertex.material_ids;
     out.material_weights = vertex.material_weights;
+    out.instance_index = vertex.instance_index;
 
     return out;
 }
@@ -131,17 +145,14 @@ fn sample_albedo_triplanar(
 ) -> vec4<f32> {
     let weights = compute_triplanar_weights(world_normal, sharpness);
 
-    // Project world position onto each axis plane
     let uv_x = world_pos.yz * tex_scale;
     let uv_y = world_pos.xz * tex_scale;
     let uv_z = world_pos.xy * tex_scale;
 
-    // Sample texture array at each projection
     let col_x = textureSample(albedo_array, albedo_sampler, uv_x, material_id);
     let col_y = textureSample(albedo_array, albedo_sampler, uv_y, material_id);
     let col_z = textureSample(albedo_array, albedo_sampler, uv_z, material_id);
 
-    // Blend based on normal direction
     return col_x * weights.x + col_y * weights.y + col_z * weights.z;
 }
 
@@ -166,61 +177,134 @@ fn sample_arm_triplanar(
 }
 
 // ============================================================================
-// Material sampling with per-material properties
+// Material sampling
 // ============================================================================
+
+struct MaterialSample {
+    albedo: vec4<f32>,
+    roughness: f32,
+    metallic: f32,
+    ao: f32,
+}
 
 fn sample_material(
     world_pos: vec3<f32>,
     world_normal: vec3<f32>,
     material_id: u32,
-) -> vec4<f32> {
-    // Clamp to valid range
+) -> MaterialSample {
+    var result: MaterialSample;
+    
     let id = min(material_id, max(settings.material_count, 1u) - 1u);
     let props = material_props[id];
     
-    // Combine global and per-material settings
     let tex_scale = settings.texture_scale * props.texture_scale;
     let sharpness = settings.blend_sharpness * props.blend_sharpness;
 
-    return sample_albedo_triplanar(world_pos, world_normal, id, tex_scale, sharpness);
+    result.albedo = sample_albedo_triplanar(world_pos, world_normal, id, tex_scale, sharpness);
+    
+    if (settings.flags & FLAG_HAS_ARM) != 0u {
+        let arm = sample_arm_triplanar(world_pos, world_normal, id, tex_scale, sharpness);
+        result.ao = arm.r;
+        result.roughness = arm.g;
+        result.metallic = arm.b;
+    } else {
+        result.ao = 1.0;
+        result.roughness = 0.5;
+        result.metallic = 0.0;
+    }
+    
+    if props.roughness_override >= 0.0 {
+        result.roughness = props.roughness_override;
+    }
+    if props.metallic_override >= 0.0 {
+        result.metallic = props.metallic_override;
+    }
+    
+    return result;
 }
 
 // ============================================================================
-// Fragment shader
+// Fragment shader - manually construct PbrInput since we have custom VertexOutput
 // ============================================================================
 
+#import bevy_pbr::{
+    pbr_types::{PbrInput, pbr_input_new},
+    pbr_functions as fns,
+    mesh_view_bindings::view,
+}
+
 @fragment
-fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    let world_position = in.world_position;
+fn fragment(
+    in: VertexOutput,
+    @builtin(front_facing) is_front: bool,
+) -> FragmentOutput {
+    let world_position = in.world_position.xyz;
     let world_normal = normalize(in.world_normal);
 
-    // Unpack material data from vertex
+    // Unpack material data
     let mat_ids = unpack_material_ids(in.material_ids);
     let mat_weights = unpack_material_weights(in.material_weights);
 
-    // Blend up to 4 materials based on vertex weights
-    var final_color = vec4<f32>(0.0);
+    // Blend materials
+    var blended_albedo = vec4<f32>(0.0);
+    var blended_roughness = 0.0;
+    var blended_metallic = 0.0;
+    var blended_ao = 0.0;
 
-    // Unrolled loop for 4 materials (GPU-friendly)
     if mat_weights.x > 0.001 {
-        final_color += sample_material(world_position, world_normal, mat_ids.x) * mat_weights.x;
+        let sample = sample_material(world_position, world_normal, mat_ids.x);
+        blended_albedo += sample.albedo * mat_weights.x;
+        blended_roughness += sample.roughness * mat_weights.x;
+        blended_metallic += sample.metallic * mat_weights.x;
+        blended_ao += sample.ao * mat_weights.x;
     }
     if mat_weights.y > 0.001 {
-        final_color += sample_material(world_position, world_normal, mat_ids.y) * mat_weights.y;
+        let sample = sample_material(world_position, world_normal, mat_ids.y);
+        blended_albedo += sample.albedo * mat_weights.y;
+        blended_roughness += sample.roughness * mat_weights.y;
+        blended_metallic += sample.metallic * mat_weights.y;
+        blended_ao += sample.ao * mat_weights.y;
     }
     if mat_weights.z > 0.001 {
-        final_color += sample_material(world_position, world_normal, mat_ids.z) * mat_weights.z;
+        let sample = sample_material(world_position, world_normal, mat_ids.z);
+        blended_albedo += sample.albedo * mat_weights.z;
+        blended_roughness += sample.roughness * mat_weights.z;
+        blended_metallic += sample.metallic * mat_weights.z;
+        blended_ao += sample.ao * mat_weights.z;
     }
     if mat_weights.w > 0.001 {
-        final_color += sample_material(world_position, world_normal, mat_ids.w) * mat_weights.w;
+        let sample = sample_material(world_position, world_normal, mat_ids.w);
+        blended_albedo += sample.albedo * mat_weights.w;
+        blended_roughness += sample.roughness * mat_weights.w;
+        blended_metallic += sample.metallic * mat_weights.w;
+        blended_ao += sample.ao * mat_weights.w;
     }
 
-    // Simple directional lighting for testing
-    // TODO: Integrate with Bevy's PBR lighting
-    let light_dir = normalize(vec3<f32>(0.5, 1.0, 0.3));
-    let ndotl = max(dot(world_normal, light_dir), 0.0);
-    let ambient = 0.3;
-    let lighting = ambient + (1.0 - ambient) * ndotl;
+    // Build PbrInput manually (following array_texture.wgsl pattern)
+    var pbr_input: PbrInput = pbr_input_new();
+    
+    // Set material base color
+    pbr_input.material.base_color = blended_albedo;
+    
+    // Geometry setup
+    pbr_input.frag_coord = in.position;
+    pbr_input.world_position = in.world_position;
+    pbr_input.world_normal = fns::prepare_world_normal(
+        world_normal,
+        false,  // double_sided
+        is_front,
+    );
+    pbr_input.is_orthographic = view.clip_from_view[3].w == 1.0;
+    pbr_input.N = normalize(pbr_input.world_normal);
+    pbr_input.V = fns::calculate_view(in.world_position, pbr_input.is_orthographic);
 
-    return vec4<f32>(final_color.rgb * lighting, final_color.a);
+#ifdef PREPASS_PIPELINE
+    let out = deferred_output(in, pbr_input);
+#else
+    var out: FragmentOutput;
+    out.color = apply_pbr_lighting(pbr_input);
+    out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+#endif
+
+    return out;
 }
