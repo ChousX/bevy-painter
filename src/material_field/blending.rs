@@ -119,8 +119,8 @@ fn sample_density(
     }
 
     // Out of bounds, no neighbor - return exterior
-    1.0
-}
+    let clamped = voxel.clamp(IVec3::ZERO, field_size - IVec3::ONE);
+field.get(clamped.x as u32, clamped.y as u32, clamped.z as u32)}
 
 /// Samples material at a voxel coordinate, handling neighbor lookups.
 #[inline]
