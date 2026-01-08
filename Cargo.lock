@@ -366,7 +366,7 @@ dependencies = [
 [[package]]
 name = "bevy-sculpter"
 version = "0.1.5"
-source = "git+https://github.com/ChousX/bevy-sculpter.git#c6c5d479208633b306fd4a4103c029bc39759d0d"
+source = "git+https://github.com/ChousX/bevy-sculpter.git#518baa35e47efde8001c1c6912bd961a9774f99c"
 dependencies = [
  "bevy",
  "bytemuck",
@@ -2916,9 +2916,9 @@ dependencies = [
 
 [[package]]
 name = "libc"
-version = "0.2.179"
+version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5a2d376baa530d1238d133232d15e239abad80d05838b4b59354e5268af431f"
+checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
 
 [[package]]
 name = "libloading"

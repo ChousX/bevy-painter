@@ -8,6 +8,9 @@
 mod blending;
 mod field;
 
+// Import Field trait so it's available for the MaterialSliceExt impl
+use bevy_sculpter::field::Field;
+
 pub use blending::{MaterialBlendSettings, compute_vertex_materials};
 pub use field::{FIELD_SIZE, FIELD_VOLUME, MaterialField, MaterialFieldDirty};
 
@@ -32,9 +35,7 @@ pub trait MaterialSliceExt {
 
 impl MaterialSliceExt for MaterialSlice {
     fn from_material_field(field: &MaterialField, face: NeighborFace) -> Self {
-        Self::from_sampler(face, FIELD_SIZE, |a, b, depth| {
-            let (x, y, z) = face.to_field_coords(a, b, depth, FIELD_SIZE);
-            field.get(x, y, z)
-        })
+        // Now we can use NeighborSlice::from_field since Field trait is in scope
+        Self::from_field(field, face)
     }
 }

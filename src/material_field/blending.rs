@@ -1,9 +1,12 @@
 //! Material blending logic based on density values.
 
 use bevy::prelude::*;
-use bevy_sculpter::prelude::{DensityField, NeighborDensityFields};
+use bevy_sculpter::{
+    field::Field,
+    prelude::{DensityField, NeighborDensityFields},
+};
 
-use super::{FIELD_SIZE, MaterialField, NeighborMaterialFields};
+use super::{MaterialField, NeighborMaterialFields};
 use crate::mesh::VertexMaterialData;
 
 /// Settings for material blending at vertices.
@@ -57,10 +60,10 @@ pub fn compute_vertex_materials(
     neighbor_materials: Option<&NeighborMaterialFields>,
     settings: &MaterialBlendSettings,
 ) -> VertexMaterialData {
-    let scale = FIELD_SIZE.as_vec3() / mesh_size;
+    let field_size = DensityField::SIZE;
+    let scale = field_size.as_vec3() / mesh_size;
     let grid_pos = world_pos * scale;
     let base = grid_pos.floor().as_ivec3();
-    let field_size = FIELD_SIZE.as_ivec3();
 
     // Collect materials and their weights from 8 surrounding voxels
     let mut contributions: Vec<(u8, f32)> = Vec::with_capacity(8);
@@ -79,7 +82,6 @@ pub fn compute_vertex_materials(
             material_field,
             neighbor_densities,
             neighbor_materials,
-            field_size,
         ) else {
             continue;
         };
@@ -105,17 +107,14 @@ pub fn compute_vertex_materials(
         if any_valid_sample {
             return VertexMaterialData::single(fallback_material);
         }
-        
+
         // Absolute fallback: sample nearest in-bounds voxel
-        let clamped = grid_pos.round().as_ivec3().clamp(
-            IVec3::ZERO,
-            field_size - IVec3::ONE,
-        );
-        let material = material_field.get(
-            clamped.x as u32,
-            clamped.y as u32,
-            clamped.z as u32,
-        );
+        let field_size_i = field_size.as_ivec3();
+        let clamped = grid_pos
+            .round()
+            .as_ivec3()
+            .clamp(IVec3::ZERO, field_size_i - IVec3::ONE);
+        let material = material_field.get(clamped.x as u32, clamped.y as u32, clamped.z as u32);
         return VertexMaterialData::single(material);
     }
 
@@ -137,26 +136,18 @@ fn sample_voxel(
     material_field: &MaterialField,
     neighbor_densities: Option<&NeighborDensityFields>,
     neighbor_materials: Option<&NeighborMaterialFields>,
-    field_size: IVec3,
 ) -> Option<(f32, u8)> {
-    // Check if in bounds
-    let in_bounds = voxel.x >= 0
-        && voxel.y >= 0
-        && voxel.z >= 0
-        && voxel.x < field_size.x
-        && voxel.y < field_size.y
-        && voxel.z < field_size.z;
-
-    if in_bounds {
-        // Direct sample from local fields
-        let density = density_field.get(voxel.x as u32, voxel.y as u32, voxel.z as u32);
-        let material = material_field.get(voxel.x as u32, voxel.y as u32, voxel.z as u32);
+    // Try local fields first
+    if let (Some(density), Some(material)) = (
+        density_field.get_ivec3(voxel),
+        material_field.get_ivec3(voxel),
+    ) {
         return Some((density, material));
     }
 
     // Out of bounds - need BOTH neighbor fields to have data
-    let density = neighbor_densities?.sample(voxel, field_size)?;
-    let material = neighbor_materials?.sample(voxel, field_size)?;
+    let density = neighbor_densities?.sample_for::<DensityField>(voxel)?;
+    let material = neighbor_materials?.sample_for::<MaterialField>(voxel)?;
 
     Some((density, material))
 }
@@ -255,19 +246,18 @@ mod tests {
     fn test_sample_voxel_in_bounds() {
         let mut density_field = DensityField::new();
         let mut material_field = MaterialField::new();
-        
+
         density_field.set(5, 5, 5, -0.5);
         material_field.set(5, 5, 5, 3);
-        
+
         let result = sample_voxel(
             IVec3::new(5, 5, 5),
             &density_field,
             &material_field,
             None,
             None,
-            FIELD_SIZE.as_ivec3(),
         );
-        
+
         assert_eq!(result, Some((-0.5, 3)));
     }
 
@@ -275,7 +265,7 @@ mod tests {
     fn test_sample_voxel_out_of_bounds_no_neighbors() {
         let density_field = DensityField::new();
         let material_field = MaterialField::new();
-        
+
         // Out of bounds with no neighbor data should return None
         let result = sample_voxel(
             IVec3::new(-1, 5, 5),
@@ -283,9 +273,8 @@ mod tests {
             &material_field,
             None,
             None,
-            FIELD_SIZE.as_ivec3(),
         );
-        
+
         assert_eq!(result, None);
     }
 }
