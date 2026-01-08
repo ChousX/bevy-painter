@@ -22,5 +22,7 @@ bevy = { version = "0.17", default-features = true, features = [
 ]}
 bytemuck = "1.24.0"
 thiserror = "2"
-bevy-sculpter = {version = "0.1", optional = true}
+#bevy-sculpter = {version = "0.1", optional = true}
+bevy-sculpter = {git = "https://github.com/ChousX/bevy-sculpter.git", optional = true}
+
 chunky-bevy = {version = "0.2", optional = true}
