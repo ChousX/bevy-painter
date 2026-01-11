@@ -13,18 +13,18 @@ mod attributes;
 mod builder;
 mod vertex_data;
 
-pub use attributes::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
+pub use attributes::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS, ATTRIBUTE_VISIBILITY};
 pub use builder::{MeshTriplanarExt, TriplanarMeshBuilder};
 pub use vertex_data::VertexMaterialData;
 
 /// Packs material data into a vertex color value.
-/// 
+///
 /// Material IDs go into the R channel, weights into G channel.
 /// Both are packed as 4x u8 into u32, then bitcast to f32.
 pub fn pack_material_to_color(data: &VertexMaterialData) -> [f32; 4] {
     let packed_ids = data.pack_ids();
     let packed_weights = data.pack_weights();
-    
+
     [
         f32::from_bits(packed_ids),
         f32::from_bits(packed_weights),
@@ -37,7 +37,7 @@ pub fn pack_material_to_color(data: &VertexMaterialData) -> [f32; 4] {
 pub fn unpack_material_from_color(color: [f32; 4]) -> VertexMaterialData {
     let packed_ids = color[0].to_bits();
     let packed_weights = color[1].to_bits();
-    
+
     VertexMaterialData {
         ids: [
             (packed_ids & 0xFF) as u8,
@@ -80,10 +80,7 @@ impl MeshTriplanarColorExt for Mesh {
             vertex_count
         );
 
-        let colors: Vec<[f32; 4]> = material_data
-            .iter()
-            .map(pack_material_to_color)
-            .collect();
+        let colors: Vec<[f32; 4]> = material_data.iter().map(pack_material_to_color).collect();
 
         self.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
         self
@@ -106,14 +103,11 @@ mod tests {
 
     #[test]
     fn test_pack_unpack_roundtrip() {
-        let original = VertexMaterialData::blend4(
-            [1, 5, 10, 255],
-            [0.5, 0.25, 0.15, 0.1],
-        );
-        
+        let original = VertexMaterialData::blend4([1, 5, 10, 255], [0.5, 0.25, 0.15, 0.1]);
+
         let packed = pack_material_to_color(&original);
         let unpacked = unpack_material_from_color(packed);
-        
+
         assert_eq!(original.ids, unpacked.ids);
         assert_eq!(original.weights, unpacked.weights);
     }
@@ -123,7 +117,7 @@ mod tests {
         let data = VertexMaterialData::single(42);
         let packed = pack_material_to_color(&data);
         let unpacked = unpack_material_from_color(packed);
-        
+
         assert_eq!(unpacked.ids[0], 42);
         assert_eq!(unpacked.weights[0], 255);
     }

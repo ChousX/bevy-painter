@@ -1,5 +1,5 @@
 // Triplanar voxel material extension shader
-// Extends StandardMaterial with triplanar mapping and multi-material blending
+// Extends StandardMaterial with triplanar mapping, multi-material blending, and visibility culling
 // No UVs required - texture coordinates derived from world position
 
 #import bevy_pbr::{
@@ -27,6 +27,10 @@ struct TriplanarSettings {
     blend_sharpness: f32,
     flags: u32,
     material_count: u32,
+    visibility_cutoff: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
 }
 
 // Per-material properties - must match MaterialPropertiesGpu in properties.rs
@@ -38,7 +42,6 @@ struct MaterialProperties {
 }
 
 // Bindings - must match extension.rs bind_group_layout_entries
-// Use #{MATERIAL_BIND_GROUP} placeholder - Bevy replaces this at runtime
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> settings: TriplanarSettings;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var albedo_array: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var albedo_sampler: sampler;
@@ -52,24 +55,27 @@ struct MaterialProperties {
 const FLAG_USE_BIPLANAR: u32 = 1u;
 const FLAG_ENABLE_NORMALS: u32 = 2u;
 const FLAG_HAS_ARM: u32 = 4u;
+const FLAG_VISIBILITY_DISCARD: u32 = 8u;
 
-// Custom vertex input with material attributes
+// Custom vertex input with material attributes and visibility
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) material_ids: u32,
     @location(3) material_weights: u32,
+    @location(4) visibility: f32,
 }
 
-// Custom vertex output matching what fragment shader expects
+// Custom vertex output
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) world_position: vec4<f32>,
     @location(1) world_normal: vec3<f32>,
     @location(2) @interpolate(flat) material_ids: u32,
     @location(3) @interpolate(flat) material_weights: u32,
-    @location(4) instance_index: u32,
+    @location(4) visibility: f32,
+    @location(5) instance_index: u32,
 }
 
 @vertex
@@ -90,6 +96,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     );
     out.material_ids = vertex.material_ids;
     out.material_weights = vertex.material_weights;
+    out.visibility = vertex.visibility;
     out.instance_index = vertex.instance_index;
 
     return out;
@@ -224,7 +231,7 @@ fn sample_material(
 }
 
 // ============================================================================
-// Fragment shader - manually construct PbrInput since we have custom VertexOutput
+// Fragment shader
 // ============================================================================
 
 #import bevy_pbr::{
@@ -238,6 +245,13 @@ fn fragment(
     in: VertexOutput,
     @builtin(front_facing) is_front: bool,
 ) -> FragmentOutput {
+    // Visibility culling - discard fragments below threshold
+    if (settings.flags & FLAG_VISIBILITY_DISCARD) != 0u {
+        if in.visibility < settings.visibility_cutoff {
+            discard;
+        }
+    }
+
     let world_position = in.world_position.xyz;
     let world_normal = normalize(in.world_normal);
 
@@ -280,18 +294,15 @@ fn fragment(
         blended_ao += sample.ao * mat_weights.w;
     }
 
-    // Build PbrInput manually (following array_texture.wgsl pattern)
+    // Build PbrInput manually
     var pbr_input: PbrInput = pbr_input_new();
     
-    // Set material base color
     pbr_input.material.base_color = blended_albedo;
-    
-    // Geometry setup
     pbr_input.frag_coord = in.position;
     pbr_input.world_position = in.world_position;
     pbr_input.world_normal = fns::prepare_world_normal(
         world_normal,
-        false,  // double_sided
+        false,
         is_front,
     );
     pbr_input.is_orthographic = view.clip_from_view[3].w == 1.0;

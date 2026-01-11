@@ -6,10 +6,9 @@
 //! - Material blending logic for vertex attribute computation
 
 mod blending;
-mod field;
-
-// Import Field trait so it's available for the MaterialSliceExt impl
-use bevy_sculpter::field::Field;
+pub mod field;
+mod visibility;
+pub use visibility::{VisibilityField, VisibilityFieldDirty}; // Import Field trait so it's available for the MaterialSliceExt impl
 
 pub use blending::{MaterialBlendSettings, compute_vertex_materials};
 pub use field::{FIELD_SIZE, FIELD_VOLUME, MaterialField, MaterialFieldDirty};

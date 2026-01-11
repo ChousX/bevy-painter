@@ -272,10 +272,12 @@ mod tests {
     fn test_builder_empty_returns_none() {
         assert!(TriplanarMeshBuilder::new().build().is_none());
 
-        assert!(TriplanarMeshBuilder::new()
-            .with_vertex_single([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
-            .build()
-            .is_none()); // No indices
+        assert!(
+            TriplanarMeshBuilder::new()
+                .with_vertex_single([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], 0)
+                .build()
+                .is_none()
+        ); // No indices
     }
 
     #[test]

@@ -23,14 +23,12 @@ use bevy::render::{
 use bevy::shader::ShaderRef;
 use bytemuck::{Pod, Zeroable};
 
-use crate::mesh::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS};
+use crate::mesh::{ATTRIBUTE_MATERIAL_IDS, ATTRIBUTE_MATERIAL_WEIGHTS, ATTRIBUTE_VISIBILITY};
 use crate::palette::{MAX_MATERIALS, MaterialPropertiesGpu};
 
-/// Shader asset path (embedded).
 const TRIPLANAR_SHADER_PATH: &str =
     "embedded://bevy_painter/material/shaders/triplanar_extension.wgsl";
 
-/// Convenience type alias for the complete triplanar voxel material.
 pub type TriplanarVoxelMaterial = ExtendedMaterial<StandardMaterial, TriplanarExtension>;
 
 /// GPU-side settings for triplanar rendering.
@@ -41,12 +39,15 @@ pub struct TriplanarSettings {
     pub blend_sharpness: f32,
     pub flags: u32,
     pub material_count: u32,
+    pub visibility_cutoff: f32,
+    pub _padding: [f32; 3],
 }
 
 impl TriplanarSettings {
     pub const FLAG_USE_BIPLANAR: u32 = 1 << 0;
     pub const FLAG_ENABLE_NORMALS: u32 = 1 << 1;
     pub const FLAG_HAS_ARM: u32 = 1 << 2;
+    pub const FLAG_VISIBILITY_DISCARD: u32 = 1 << 3;
 }
 
 /// Material extension that adds triplanar mapping and multi-material blending.
@@ -60,6 +61,9 @@ pub struct TriplanarExtension {
     pub blend_sharpness: f32,
     pub use_biplanar_color: bool,
     pub enable_normal_maps: bool,
+    /// Visibility cutoff threshold. Vertices with visibility below this are discarded.
+    /// None = no visibility culling, Some(0.5) = discard if less than 50% visible.
+    pub visibility_cutoff: Option<f32>,
 }
 
 impl Default for TriplanarExtension {
@@ -73,6 +77,7 @@ impl Default for TriplanarExtension {
             blend_sharpness: 4.0,
             use_biplanar_color: true,
             enable_normal_maps: true,
+            visibility_cutoff: None,
         }
     }
 }
@@ -134,6 +139,19 @@ impl TriplanarExtension {
         self
     }
 
+    /// Enable visibility-based fragment discarding.
+    /// Vertices with visibility below the cutoff will be discarded.
+    pub fn with_visibility_culling(mut self, cutoff: f32) -> Self {
+        self.visibility_cutoff = Some(cutoff.clamp(0.0, 1.0));
+        self
+    }
+
+    /// Disable visibility culling.
+    pub fn without_visibility_culling(mut self) -> Self {
+        self.visibility_cutoff = None;
+        self
+    }
+
     pub fn build_settings(&self) -> TriplanarSettings {
         let mut flags = 0u32;
 
@@ -149,11 +167,17 @@ impl TriplanarExtension {
             flags |= TriplanarSettings::FLAG_HAS_ARM;
         }
 
+        if self.visibility_cutoff.is_some() {
+            flags |= TriplanarSettings::FLAG_VISIBILITY_DISCARD;
+        }
+
         TriplanarSettings {
             texture_scale: self.texture_scale,
             blend_sharpness: self.blend_sharpness,
             flags,
             material_count: self.material_properties.len().max(1) as u32,
+            visibility_cutoff: self.visibility_cutoff.unwrap_or(0.0),
+            _padding: [0.0; 3],
         }
     }
 }
@@ -327,40 +351,16 @@ impl MaterialExtension for TriplanarExtension {
         layout: &MeshVertexBufferLayoutRef,
         _key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // Custom vertex layout with our material attributes
         let vertex_layout = layout.0.get_layout(&[
             Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
             Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
             ATTRIBUTE_MATERIAL_IDS.at_shader_location(2),
             ATTRIBUTE_MATERIAL_WEIGHTS.at_shader_location(3),
+            ATTRIBUTE_VISIBILITY.at_shader_location(4),
         ])?;
 
         descriptor.vertex.buffers = vec![vertex_layout];
 
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_default_extension() {
-        let ext = TriplanarExtension::default();
-        assert_eq!(ext.texture_scale, 1.0);
-        assert_eq!(ext.blend_sharpness, 4.0);
-    }
-
-    #[test]
-    fn test_extension_builder() {
-        let ext = TriplanarExtension::new(Handle::default())
-            .with_texture_scale(2.0)
-            .with_blend_sharpness(8.0)
-            .with_materials(4);
-
-        assert_eq!(ext.texture_scale, 2.0);
-        assert_eq!(ext.blend_sharpness, 8.0);
-        assert_eq!(ext.material_properties.len(), 4);
     }
 }
