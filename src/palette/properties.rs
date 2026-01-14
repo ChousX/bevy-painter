@@ -1,6 +1,6 @@
 //! Per-material properties within a palette.
 
-use bevy::prelude::*;
+use bevy::{prelude::*, render::render_resource::ShaderSize};
 use bevy::render::render_resource::ShaderType;
 use bytemuck::{Pod, Zeroable};
 
@@ -128,9 +128,9 @@ pub const MAX_MATERIALS: usize = 128;
 /// GPU-side array of all material properties.
 ///
 /// Padded to MAX_MATERIALS for uniform buffer alignment.
-#[derive(Clone, Debug, ShaderType)]
+#[derive(Clone, Debug, ShaderType )]
 pub struct MaterialPropertiesArray {
-    #[size(runtime)]
+    #[shader(size(runtime))]
     pub materials: Vec<MaterialPropertiesGpu>,
 }
 
