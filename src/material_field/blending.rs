@@ -1,10 +1,8 @@
 //! Material blending logic based on density values.
 
 use bevy::prelude::*;
-use bevy_sculpter::{
-    field::Field,
-    prelude::{DensityField, NeighborDensityFields},
-};
+use bevy_sculpter::prelude::DefaultIsoField as DensityField;
+use bevy_sculpter::{field::Field, prelude::NeighborDensityFields};
 
 use super::{MaterialField, NeighborMaterialFields};
 use crate::mesh::VertexMaterialData;
