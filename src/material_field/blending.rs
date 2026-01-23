@@ -1,10 +1,9 @@
 //! Material and visibility blending logic based on density values.
 
 use bevy::prelude::*;
-use bevy_sculpter::{
-    field::Field,
-    prelude::{DensityField, NeighborDensityFields},
-};
+use bevy_sculpter::{field::Field, prelude::NeighborDensityFields};
+
+use bevy_sculpter::prelude::DefaultIsoField as DensityField;
 
 use super::visibility::{NeighborVisibilityFields, VisibilityField};
 use super::{MaterialField, NeighborMaterialFields};
