@@ -32,14 +32,12 @@ fn setup(
 
     // Create the triplanar material
     let material = TriplanarVoxelMaterial {
-        base: StandardMaterial {
-            ..default()
-        },
+        base: StandardMaterial { ..default() },
         extension: TriplanarExtension::new(albedo_texture)
-            .with_materials(4)            // 4 materials in texture array
-            .with_texture_scale(0.5)      // Larger texture tiling
-            .with_blend_sharpness(4.0)    // Sharp triplanar blend
-            .with_biplanar_color(false),  // Use full triplanar
+            .with_materials(4) // 4 materials in texture array
+            .with_texture_scale(0.5) // Larger texture tiling
+            .with_blend_sharpness(4.0) // Sharp triplanar blend
+            .with_biplanar_color(false), // Use full triplanar
     };
     let material_handle = materials.add(material);
 
@@ -61,7 +59,7 @@ fn setup(
     ));
 
     // Ambient light
-    commands.insert_resource(AmbientLight {
+    commands.spawn(AmbientLight {
         color: Color::WHITE,
         brightness: 300.0,
         ..default()
@@ -96,10 +94,10 @@ fn create_test_texture_array(images: &mut Assets<Image>) -> Handle<Image> {
 
     // Colors for each layer (RGBA)
     let colors: [[u8; 4]; 4] = [
-        [220, 80, 80, 255],   // Red
-        [80, 220, 80, 255],   // Green
-        [80, 80, 220, 255],   // Blue
-        [220, 220, 80, 255],  // Yellow
+        [220, 80, 80, 255],  // Red
+        [80, 220, 80, 255],  // Green
+        [80, 80, 220, 255],  // Blue
+        [220, 220, 80, 255], // Yellow
     ];
 
     let dark_factor = 0.6;
@@ -170,10 +168,26 @@ fn create_terrain_mesh() -> Mesh {
             let py = heights[z][x];
 
             // Calculate normal from height differences
-            let h_l = if x > 0 { heights[z][x - 1] } else { heights[z][x] };
-            let h_r = if x < grid_size { heights[z][x + 1] } else { heights[z][x] };
-            let h_d = if z > 0 { heights[z - 1][x] } else { heights[z][x] };
-            let h_u = if z < grid_size { heights[z + 1][x] } else { heights[z][x] };
+            let h_l = if x > 0 {
+                heights[z][x - 1]
+            } else {
+                heights[z][x]
+            };
+            let h_r = if x < grid_size {
+                heights[z][x + 1]
+            } else {
+                heights[z][x]
+            };
+            let h_d = if z > 0 {
+                heights[z - 1][x]
+            } else {
+                heights[z][x]
+            };
+            let h_u = if z < grid_size {
+                heights[z + 1][x]
+            } else {
+                heights[z][x]
+            };
 
             let normal = Vec3::new(h_l - h_r, 2.0 * scale, h_d - h_u).normalize();
 

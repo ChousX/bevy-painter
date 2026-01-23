@@ -130,7 +130,7 @@ pub const MAX_MATERIALS: usize = 128;
 /// Padded to MAX_MATERIALS for uniform buffer alignment.
 #[derive(Clone, Debug, ShaderType)]
 pub struct MaterialPropertiesArray {
-    #[size(runtime)]
+    #[shader(size(runtime))]
     pub materials: Vec<MaterialPropertiesGpu>,
 }
 

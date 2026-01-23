@@ -299,8 +299,8 @@ impl AsBindGroup for TriplanarExtension {
         .to_vec()
     }
 
-    fn label() -> Option<&'static str> {
-        Some("triplanar_extension")
+    fn label() -> &'static str {
+        "triplanar_extension"
     }
 }
 
