@@ -1,8 +1,8 @@
 //! Material blending logic based on density values.
 
 use bevy::prelude::*;
-use bevy_sculpter::prelude::DefaultIsoField as DensityField;
-use bevy_sculpter::{field::Field, prelude::NeighborDensityFields};
+use bevy_sculpter::prelude::SdfVolume as DensityField;
+use bevy_sculpter::prelude::*;
 
 use super::{MaterialField, NeighborMaterialFields};
 use crate::mesh::VertexMaterialData;
@@ -54,7 +54,7 @@ pub fn compute_vertex_materials(
     mesh_size: Vec3,
     density_field: &DensityField,
     material_field: &MaterialField,
-    neighbor_densities: Option<&NeighborDensityFields>,
+    neighbor_densities: Option<&NeighborFields<f32>>,
     neighbor_materials: Option<&NeighborMaterialFields>,
     settings: &MaterialBlendSettings,
 ) -> VertexMaterialData {
@@ -132,7 +132,7 @@ fn sample_voxel(
     voxel: IVec3,
     density_field: &DensityField,
     material_field: &MaterialField,
-    neighbor_densities: Option<&NeighborDensityFields>,
+    neighbor_densities: Option<&NeighborFields<f32>>,
     neighbor_materials: Option<&NeighborMaterialFields>,
 ) -> Option<(f32, u8)> {
     // Try local fields first
