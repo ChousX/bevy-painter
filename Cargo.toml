@@ -22,6 +22,6 @@ bevy = { version = "0.18", default-features = true, features = [
 ]}
 bytemuck = "1.24.0"
 thiserror = "2"
-bevy-sculpter = {git = "https://github.com/ChousX/bevy-sculpter.git", branch = "instance", optional = true}
-chunky-bevy = {git = "https://github.com/ChousX/chunky-bevy.git", branch = "instance", optional = true}
+bevy-sculpter = {git = "https://github.com/ChousX/bevy-sculpter.git", branch = "v2", optional = true}
+chunky-bevy = {git = "https://github.com/ChousX/chunky-bevy.git", branch = "update", optional = true}
 
