@@ -22,6 +22,7 @@ pub use plugin::TriplanarVoxelPlugin;
 
 /// Prelude module with commonly used types.
 pub mod prelude {
+    // src/prelude.rs
     pub use crate::TriplanarVoxelPlugin;
     pub use crate::material::{TriplanarExtension, TriplanarSettings, TriplanarVoxelMaterial};
     pub use crate::mesh::{
@@ -29,6 +30,28 @@ pub mod prelude {
         VertexMaterialData,
     };
     pub use crate::palette::{MAX_MATERIALS, MaterialPropertiesGpu};
+
+    #[cfg(feature = "material_field")]
+    pub use crate::material_field::{
+        BoxLayer,
+        ChunkBounds,
+        FillLayer,
+        HeightLayer,
+        MaterialBlendSettings,
+        // Core types
+        MaterialField,
+        MaterialFieldBundle,
+        // Generation
+        MaterialLayer,
+        MaterialLayerStack,
+        MaterialSlice,
+        MaterialSliceExt,
+        // Integration
+        MeshMaterialIntegration,
+        NeighborMaterialFields,
+        SamplerLayer,
+        SphereLayer,
+    };
 }
 /// Shader asset path (embedded).
 const TRIPLANAR_SHADER_PATH: &str =

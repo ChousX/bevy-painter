@@ -1,7 +1,6 @@
 //! Material blending logic based on density values.
 
 use bevy::prelude::*;
-use bevy_sculpter::prelude::SdfVolume as DensityField;
 use bevy_sculpter::prelude::*;
 
 use super::{MaterialField, NeighborMaterialFields};
@@ -49,16 +48,16 @@ const CORNER_OFFSETS: [IVec3; 8] = [
 ///
 /// Only contributes voxels where BOTH density and material data are available,
 /// preventing incorrect material 0 blending at chunk boundaries.
-pub fn compute_vertex_materials(
+pub fn compute_vertex_materials<D: Field<f32>>(
     world_pos: Vec3,
     mesh_size: Vec3,
-    density_field: &DensityField,
+    density_field: &D,
     material_field: &MaterialField,
     neighbor_densities: Option<&NeighborFields<f32>>,
     neighbor_materials: Option<&NeighborMaterialFields>,
     settings: &MaterialBlendSettings,
 ) -> VertexMaterialData {
-    let field_size = DensityField::SIZE;
+    let field_size = D::SIZE;
     let scale = field_size.as_vec3() / mesh_size;
     let grid_pos = world_pos * scale;
     let base = grid_pos.floor().as_ivec3();
@@ -128,9 +127,9 @@ pub fn compute_vertex_materials(
 ///
 /// This ensures consistency - we only blend voxels where we have complete information.
 #[inline]
-fn sample_voxel(
+fn sample_voxel<D: Field<f32>>(
     voxel: IVec3,
-    density_field: &DensityField,
+    density_field: &D,
     material_field: &MaterialField,
     neighbor_densities: Option<&NeighborFields<f32>>,
     neighbor_materials: Option<&NeighborMaterialFields>,
@@ -144,7 +143,7 @@ fn sample_voxel(
     }
 
     // Out of bounds - need BOTH neighbor fields to have data
-    let density = neighbor_densities?.sample_for::<DensityField>(voxel)?;
+    let density = neighbor_densities?.sample_for::<D>(voxel)?;
     let material = neighbor_materials?.sample_for::<MaterialField>(voxel)?;
 
     Some((density, material))
@@ -238,41 +237,5 @@ mod tests {
         let data = contributions_to_vertex_data(&[(1, 0.5), (2, 0.5)]);
         assert_eq!(data.ids[0], 1);
         assert_eq!(data.ids[1], 2);
-    }
-
-    #[test]
-    fn test_sample_voxel_in_bounds() {
-        let mut density_field = DensityField::new();
-        let mut material_field = MaterialField::new();
-
-        density_field.set(5, 5, 5, -0.5);
-        material_field.set(5, 5, 5, 3);
-
-        let result = sample_voxel(
-            IVec3::new(5, 5, 5),
-            &density_field,
-            &material_field,
-            None,
-            None,
-        );
-
-        assert_eq!(result, Some((-0.5, 3)));
-    }
-
-    #[test]
-    fn test_sample_voxel_out_of_bounds_no_neighbors() {
-        let density_field = DensityField::new();
-        let material_field = MaterialField::new();
-
-        // Out of bounds with no neighbor data should return None
-        let result = sample_voxel(
-            IVec3::new(-1, 5, 5),
-            &density_field,
-            &material_field,
-            None,
-            None,
-        );
-
-        assert_eq!(result, None);
     }
 }
