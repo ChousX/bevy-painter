@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use bevy_sculpter::field::Field;
+use serde::{Serialize, Deserialize};
 
 /// Size of the material field grid (must match bevy_sculpter::DENSITY_FIELD_SIZE).
 pub const FIELD_SIZE: UVec3 = uvec3(32, 32, 32);
@@ -32,7 +33,7 @@ pub const FIELD_VOLUME: usize = (FIELD_SIZE.x * FIELD_SIZE.y * FIELD_SIZE.z) as 
 /// // Query material
 /// assert_eq!(field.get(16, 16, 16), 2);
 /// ```
-#[derive(Component, Clone, Debug)]
+#[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct MaterialField(pub Vec<u8>);
 
 impl Default for MaterialField {
