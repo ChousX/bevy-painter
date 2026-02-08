@@ -7,6 +7,7 @@ use bevy::pbr::{
     StandardMaterial,
 };
 use bevy::prelude::*;
+use bevy::render::render_resource::{AddressMode, FilterMode, SamplerDescriptor};
 use bevy::render::{
     render_asset::RenderAssets,
     render_resource::{
@@ -179,7 +180,16 @@ impl AsBindGroup for TriplanarExtension {
 
         let normal_image = self.normal.as_ref().and_then(|h| gpu_images.get(h));
         let arm_image = self.arm.as_ref().and_then(|h| gpu_images.get(h));
-
+        let repeat_sampler = render_device.create_sampler(&SamplerDescriptor {
+            label: Some("triplanar_repeat_sampler"),
+            address_mode_u: AddressMode::Repeat,
+            address_mode_v: AddressMode::Repeat,
+            address_mode_w: AddressMode::Repeat,
+            mag_filter: FilterMode::Linear,
+            min_filter: FilterMode::Linear,
+            mipmap_filter: FilterMode::Linear,
+            ..Default::default()
+        });
         let settings = self.build_settings();
         let settings_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("triplanar_settings"),
@@ -220,7 +230,7 @@ impl AsBindGroup for TriplanarExtension {
                     102,
                     OwnedBindingResource::Sampler(
                         SamplerBindingType::Filtering,
-                        albedo_image.sampler.clone(),
+                        repeat_sampler.clone(),
                     ),
                 ),
                 (103, OwnedBindingResource::Buffer(props_buffer)),
