@@ -92,7 +92,7 @@ impl PaletteMaterial {
 /// GPU-side representation of material properties.
 ///
 /// This is stored in a uniform buffer and indexed by material ID in the shader.
-#[derive(Clone, Copy, Debug, Default, ShaderType, Pod, Zeroable)]
+#[derive(Clone, Copy, Debug, ShaderType, Pod, Zeroable)]
 #[repr(C)]
 pub struct MaterialPropertiesGpu {
     /// Texture scale (world units per repeat).
@@ -115,6 +115,17 @@ impl From<&PaletteMaterial> for MaterialPropertiesGpu {
             blend_sharpness: mat.blend_sharpness,
             roughness_override: mat.roughness_override.unwrap_or(-1.0),
             metallic_override: mat.metallic_override.unwrap_or(-1.0),
+        }
+    }
+}
+
+impl Default for MaterialPropertiesGpu {
+    fn default() -> Self {
+        Self {
+            texture_scale: 1.0,       // neutral multiplier
+            blend_sharpness: 1.0,     // neutral multiplier
+            roughness_override: -1.0, // negative = "use texture"
+            metallic_override: -1.0,  // negative = "use texture"
         }
     }
 }
