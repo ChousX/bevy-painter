@@ -367,7 +367,7 @@ dependencies = [
 [[package]]
 name = "bevy-sculpter"
 version = "0.18.0"
-source = "git+https://github.com/ChousX/bevy-sculpter?branch=v2#a618a373ee076f6898b676872fcbe68f0cb03f54"
+source = "git+https://github.com/ChousX/bevy-sculpter?branch=v3#5abd37970e181cbef8f57e107f1435a6fb7f8090"
 dependencies = [
  "bevy",
  "bytemuck",
